@@ -1,0 +1,78 @@
+<div class="min-h-dvh bg-base-100 pt-16 text-base-content">
+  <main class="mx-auto flex max-w-5xl flex-col px-3 py-6 sm:px-6">
+    <h1 class="sr-only">Territorial — lobby</h1>
+
+    <!-- Panel gracza. Nad lobby, dosunięty do jego prawej krawędzi. -->
+    <a
+      routerLink="/profile"
+      class="crt-panel-glow group mb-2 ml-auto flex items-center gap-2.5 border border-primary/70 bg-base-300/70 px-3 py-1.5 transition-colors hover:border-primary hover:bg-primary/20"
+      [attr.aria-label]="'Profil gracza ' + (playerService.playerProfile()?.nickname ?? '')"
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        class="size-5 text-primary opacity-80 transition-opacity group-hover:opacity-100"
+        aria-hidden="true"
+      >
+        <path
+          fill-rule="evenodd"
+          clip-rule="evenodd"
+          d="M7.49996 6C7.49996 3.51472 9.51468 1.5 12 1.5C14.4852 1.5 16.5 3.51472 16.5 6C16.5 8.48528 14.4852 10.5 12 10.5C9.51468 10.5 7.49996 8.48528 7.49996 6Z"
+        />
+        <path
+          fill-rule="evenodd"
+          clip-rule="evenodd"
+          d="M3.75121 20.1053C3.82855 15.6156 7.49195 12 12 12C16.5081 12 20.1716 15.6157 20.2487 20.1056C20.2538 20.4034 20.0823 20.676 19.8116 20.8002C17.4327 21.8918 14.7865 22.5 12.0003 22.5C9.21382 22.5 6.5674 21.8917 4.18829 20.7999C3.91762 20.6757 3.74608 20.4031 3.75121 20.1053Z"
+        />
+      </svg>
+
+      @if (playerService.playerProfile(); as player) {
+        <span class="crt-glow text-xs font-semibold tracking-widest text-primary uppercase">
+          {{ player.nickname }}
+        </span>
+        <span
+          class="size-4 shrink-0 border border-primary/70"
+          [style.background-color]="playerColor()"
+          aria-hidden="true"
+        ></span>
+      } @else {
+        <span class="text-xs tracking-widest text-primary/70 uppercase">no signal</span>
+      }
+    </a>
+
+    <!-- Panel nie rozciąga się na całą wysokość: to wizytówka lobby, a nie sam widok lobby. -->
+    <section class="flex flex-col border border-primary/25 bg-base-200/40">
+      <app-lobby-brief [header]="lobby.header()" />
+
+      <footer
+        class="flex flex-wrap items-center justify-between gap-4 border-t border-primary/25 px-4 py-3"
+      >
+        <div class="flex items-baseline gap-3">
+          <span class="text-[10px] tracking-[0.3em] uppercase opacity-60">
+            {{ lobby.countdownRunning() ? 'starting in...' : 'standby' }}
+          </span>
+          <span
+            role="timer"
+            aria-label="Czas do startu meczu"
+            class="crt-glow text-2xl tracking-[0.15em] text-primary tabular-nums"
+          >
+            {{ countdown() }}
+          </span>
+          @if (!lobby.countdownRunning()) {
+            <span class="sr-only">
+              Odliczanie jest wstrzymane do czasu uruchomienia serwera gry.
+            </span>
+          }
+        </div>
+
+        <a
+          routerLink="/lobby"
+          class="btn btn-outline btn-primary btn-md tracking-[0.3em] uppercase"
+        >
+          join lobby
+        </a>
+      </footer>
+    </section>
+  </main>
+</div>

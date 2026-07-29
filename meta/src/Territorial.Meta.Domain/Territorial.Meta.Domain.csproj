@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Warstwa domeny: ZERO referencji do projektów i pakietów.
+       Jeśli kiedykolwiek pojawi się tu <PackageReference>, to sygnał,
+       że logika domenowa przecieka do infrastruktury. -->
+</Project>

@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <!-- Identyfikator magazynu user-secrets (klucz podpisu JWT, faza 4). -->
+    <UserSecretsId>22d7be3d-b5ba-4462-863d-979f563f1d8a</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <PackageReference Include="Scalar.AspNetCore" />
+    <!-- Tylko dla dotnet ef; nie trafia do wyjścia publikacji. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Territorial.Meta.Application\Territorial.Meta.Application.csproj" />
+    <ProjectReference Include="..\Territorial.Meta.Infrastructure\Territorial.Meta.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Program z top-level statements jest internal; WebApplicationFactory<Program>
+         w testach integracyjnych potrzebuje do niego dostępu. -->
+    <InternalsVisibleTo Include="Territorial.Meta.Api.IntegrationTests" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,12 @@
+<!--
+  Nakładki kineskopu wiszą na .crt-screen. Trzymamy je tutaj, a nie w home,
+  żeby każda trasa dostawała ten sam ekran. Same nakładki są fixed, więc
+  ten kontener nie potrzebuje wysokości ani tła.
+-->
+<div class="crt-screen">
+  <app-nav/>
+
+  <div [class.mt-24]="contained()" [class.container]="contained()" [class.mx-auto]="contained()">
+    <router-outlet />
+  </div>
+</div>

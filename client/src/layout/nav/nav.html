@@ -1,0 +1,140 @@
+<header
+  class="fixed top-0 z-50 w-full border-b border-primary/30 bg-linear-to-r from-base-300 via-base-100 to-base-100 text-base-content shadow-lg shadow-black/60"
+>
+  <div class="navbar mx-auto min-h-16 max-w-7xl px-4 lg:px-8">
+    <div class="navbar-start">
+      <!--
+        Dla gracza w lobby logo prowadzi do lobby, nie na stronę główną. Guard i tak by
+        go tam odesłał, ale link kierujący od razu we właściwe miejsce jest uczciwszy
+        i zostawia guardowi rolę siatki bezpieczeństwa (wpisany adres, zakładka, wstecz)
+        zamiast ścieżki używanej przy każdym kliknięciu.
+      -->
+      <a
+        [routerLink]="lobby.joined() ? '/lobby' : '/'"
+        routerLinkActive="text-accent"
+        [routerLinkActiveOptions]="{ exact: true }"
+        class="flex items-center gap-3 transition-colors hover:text-accent"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke-width="1.5"
+          stroke="currentColor"
+          class="size-8 shrink-0 sm:size-10"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="m20.893 13.393-1.135-1.135a2.252 2.252 0 0 1-.421-.585l-1.08-2.16a.414.414 0 0 0-.663-.107.827.827 0 0 1-.812.21l-1.273-.363a.89.89 0 0 0-.738 1.595l.587.39c.59.395.674 1.23.172 1.732l-.2.2c-.212.212-.33.498-.33.796v.41c0 .409-.11.809-.32 1.158l-1.315 2.191a2.11 2.11 0 0 1-1.81 1.025 1.055 1.055 0 0 1-1.055-1.055v-1.172c0-.92-.56-1.747-1.414-2.089l-.655-.261a2.25 2.25 0 0 1-1.383-2.46l.007-.042a2.25 2.25 0 0 1 .29-.787l.09-.15a2.25 2.25 0 0 1 2.37-1.048l1.178.236a1.125 1.125 0 0 0 1.302-.795l.208-.73a1.125 1.125 0 0 0-.578-1.315l-.665-.332-.091.091a2.25 2.25 0 0 1-1.591.659h-.18c-.249 0-.487.1-.662.274a.931.931 0 0 1-1.458-1.137l1.411-2.353a2.25 2.25 0 0 0 .286-.76m11.928 9.869A9 9 0 0 0 8.965 3.525m11.928 9.868A9 9 0 1 1 8.965 3.525"
+          />
+        </svg>
+
+        <h3 class="hidden text-xl font-semibold tracking-[0.15em] uppercase sm:block">
+          territorial-game
+        </h3>
+      </a>
+    </div>
+
+    <nav class="navbar-center">
+      <ul
+        class="menu menu-horizontal gap-0.5 px-0 text-xs font-medium tracking-wide uppercase sm:gap-1 sm:text-sm sm:tracking-widest"
+      >
+        <!--
+          Dla gracza w lobby ta pozycja prowadzi do lobby, a nie na stronę główną —
+          strona główna pokazuje mu to samo, tylko bez listy graczy. Przemianowany link
+          zamiast wygaszonego: martwy link czyta się jak błąd.
+        -->
+        <li>
+          @if (lobby.joined()) {
+            <a routerLink="/lobby" routerLinkActive="text-accent" class="px-1.5 hover:bg-primary/10 sm:px-3">
+              lobby
+            </a>
+          } @else {
+            <a
+              routerLink="/"
+              routerLinkActive="text-accent"
+              [routerLinkActiveOptions]="{ exact: true }"
+              class="px-1.5 hover:bg-primary/10 sm:px-3"
+            >
+              start
+            </a>
+          }
+        </li>
+        <li>
+          <a
+            routerLink="/profile"
+            routerLinkActive="text-accent"
+            class="px-1.5 hover:bg-primary/10 sm:px-3"
+          >
+            profile
+          </a>
+        </li>
+        <li>
+          <a
+            routerLink="/guide"
+            routerLinkActive="text-accent"
+            class="px-1.5 hover:bg-primary/10 sm:px-3"
+          >
+            guide
+          </a>
+        </li>
+        <li>
+          <a
+            routerLink="/contact"
+            routerLinkActive="text-accent"
+            class="px-1.5 hover:bg-primary/10 sm:px-3"
+          >
+            contact
+          </a>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="navbar-end gap-2">
+      <!--
+        Plakietka stanu lobby. W nawigacji, a nie w treści podstron: to jest stan globalny,
+        a nawigacja jest jedynym elementem wspólnym dla wszystkich tras — dzięki temu
+        profile, guide i contact nie muszą o niej nic wiedzieć.
+      -->
+      @if (showBadge()) {
+        <a
+          routerLink="/lobby"
+          class="flex items-center gap-2 border border-primary/50 px-2 py-1 text-primary transition-colors hover:border-primary hover:bg-primary/15"
+          [attr.aria-label]="badgeLabel()"
+        >
+          <span class="size-1.5 shrink-0 bg-primary" aria-hidden="true"></span>
+
+          @if (lobby.header(); as header) {
+            <span class="hidden text-[11px] tracking-[0.15em] tabular-nums sm:inline">
+              {{ header.playerCount }}/{{ header.maxPlayers }}
+            </span>
+          }
+
+          <span class="crt-glow text-[11px] tracking-[0.15em] tabular-nums">{{ countdown() }}</span>
+        </a>
+      }
+
+      <a
+        href="https://github.com/dawidbis"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="btn btn-square btn-ghost btn-sm hover:bg-primary/10 hover:text-primary sm:btn-md"
+        aria-label="GitHub"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="20"
+          height="20"
+          fill="currentColor"
+          class="bi bi-github"
+          viewBox="0 0 16 16"
+        >
+          <path
+            d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8"
+          />
+        </svg>
+      </a>
+    </div>
+  </div>
+</header>

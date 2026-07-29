@@ -1,0 +1,85 @@
+<!--
+  h-dvh + min-h-0 + overflow-hidden na całym łańcuchu: strona nigdy nie przewija się
+  jako całość, przewija się wyłącznie lista graczy. Bez tego roster ze stoma pozycjami
+  rozpychał widok na kilka ekranów.
+-->
+<div class="flex h-dvh flex-col bg-base-100 pt-16 text-base-content">
+  <main class="mx-auto flex w-full min-h-0 max-w-5xl flex-1 flex-col px-3 py-4 sm:px-6">
+    <h1 class="sr-only">Lobby</h1>
+
+    <section class="flex min-h-0 flex-1 flex-col border border-primary/25 bg-base-200/40">
+      <!-- Górna część: wizytówka lobby, ta sama co na stronie głównej. -->
+      <div class="shrink-0 border-b border-primary/25">
+        <app-lobby-brief [header]="hub.header()" />
+      </div>
+
+      @if (problem(); as message) {
+        <p
+          role="alert"
+          class="shrink-0 border-b border-warning/40 bg-warning/10 px-4 py-2 text-xs text-warning"
+        >
+          {{ message }}
+        </p>
+      }
+
+      <!-- Dolna część: lista graczy. Wielokolumnowa, bo stu graczy w jednej kolumnie
+           to pięć ekranów. -->
+      <ul
+        class="grid min-h-0 flex-1 auto-rows-min grid-cols-1 gap-px overflow-y-auto bg-primary/10 sm:grid-cols-2 lg:grid-cols-3"
+      >
+        @for (player of players(); track player.playerId) {
+          <li class="flex items-center gap-2 bg-base-200 px-3 py-1.5">
+            <span
+              class="size-3 shrink-0 border border-primary/40"
+              [style.background-color]="player.css"
+              aria-hidden="true"
+            ></span>
+            <span class="truncate text-xs tracking-wide">{{ player.nickname }}</span>
+            @if (player.playerId === myId()) {
+              <span class="ml-auto text-[10px] tracking-[0.2em] text-primary uppercase">you</span>
+            }
+          </li>
+        } @empty {
+          <li
+            class="col-span-full bg-base-200 px-4 py-6 text-center text-xs tracking-[0.2em] uppercase opacity-60"
+          >
+            {{ hub.joined() ? 'no operators' : 'linking...' }}
+          </li>
+        }
+      </ul>
+
+      <footer
+        class="flex shrink-0 flex-wrap items-center justify-between gap-4 border-t border-primary/25 px-4 py-3"
+      >
+        <div class="flex items-baseline gap-3">
+          <span class="text-[10px] tracking-[0.3em] uppercase opacity-60">
+            {{ hub.countdownRunning() ? 'starting in...' : 'standby' }}
+          </span>
+          <span
+            role="timer"
+            aria-label="Czas do startu meczu"
+            class="crt-glow text-2xl tracking-[0.15em] text-primary tabular-nums"
+          >
+            {{ countdown() }}
+          </span>
+          @if (!hub.countdownRunning()) {
+            <span class="sr-only">
+              Odliczanie jest wstrzymane do czasu uruchomienia serwera gry.
+            </span>
+          }
+        </div>
+
+        <!-- btn-outline BEZ modyfikatora koloru wychodzi w tym motywie z alfą 0.2
+             i nie przechodzi kontrastu AA. Modyfikator jest wymagany, nie ozdobny. -->
+        <button
+          type="button"
+          class="btn btn-outline btn-error btn-md tracking-[0.3em] uppercase"
+          [disabled]="leaving() || !hub.joined()"
+          (click)="leave()"
+        >
+          {{ leaving() ? 'leaving...' : 'leave lobby' }}
+        </button>
+      </footer>
+    </section>
+  </main>
+</div>

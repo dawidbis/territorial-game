@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Territorial.Meta.Api/Territorial.Meta.Api.csproj" />
+    <Project Path="src/Territorial.Meta.Application/Territorial.Meta.Application.csproj" />
+    <Project Path="src/Territorial.Meta.Domain/Territorial.Meta.Domain.csproj" />
+    <Project Path="src/Territorial.Meta.Infrastructure/Territorial.Meta.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Territorial.Meta.Api.IntegrationTests/Territorial.Meta.Api.IntegrationTests.csproj" />
+    <Project Path="tests/Territorial.Meta.Application.Tests/Territorial.Meta.Application.Tests.csproj" />
+  </Folder>
+</Solution>

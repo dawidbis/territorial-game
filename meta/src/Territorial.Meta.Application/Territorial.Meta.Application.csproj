@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Territorial.Meta.Domain\Territorial.Meta.Domain.csproj" />
+  </ItemGroup>
+</Project>

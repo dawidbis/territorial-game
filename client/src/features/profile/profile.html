@@ -1,0 +1,147 @@
+<div class="mx-auto max-w-2xl px-3 pb-10 sm:px-6">
+  <section class="flex flex-col border border-primary/25 bg-base-200/40">
+    <header
+      class="flex flex-wrap items-center gap-x-8 gap-y-2 border-b border-primary/25 px-4 py-2 text-[11px] tracking-[0.2em] uppercase"
+    >
+      <span>
+        <span class="opacity-60">sekcja</span>
+        <span class="crt-glow ml-2 text-primary">profile</span>
+      </span>
+      @if (playerService.playerProfile()) {
+        <span class="ml-auto">
+          <span class="opacity-60">id</span>
+          <span class="ml-2 text-primary">{{ shortId() }}</span>
+        </span>
+      }
+    </header>
+
+    @if (playerService.playerProfile()) {
+      <div class="flex flex-col gap-7 px-4 py-6 sm:px-6">
+        <!-- Nick -->
+        <label class="flex flex-col gap-2">
+          <span class="text-[10px] tracking-[0.3em] uppercase opacity-60">nickname</span>
+          <input
+            type="text"
+            [value]="nickname()"
+            (input)="onNickname($event)"
+            maxlength="20"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="wpisz nick"
+            class="crt-glow w-full border border-primary/40 bg-base-100/60 px-4 py-3 text-2xl tracking-[0.1em] text-primary placeholder:text-primary/25 placeholder:tracking-normal focus:border-primary focus:outline-none sm:text-3xl"
+          />
+          <span
+            class="text-[10px] tracking-[0.2em] uppercase"
+            [class.opacity-60]="nicknameValid()"
+            [class.text-error]="!nicknameValid()"
+          >
+            3–20 znaków · litery, cyfry, - oraz _
+          </span>
+        </label>
+
+        <!-- Podgląd koloru -->
+        <div class="flex flex-col gap-2">
+          <span class="text-[10px] tracking-[0.3em] uppercase opacity-60">kolor</span>
+          <div
+            class="h-20 w-full border border-primary/40"
+            [style.background-color]="preview()"
+          ></div>
+        </div>
+
+        <!-- Składowe HSV -->
+        <div class="flex flex-col gap-4">
+          <label class="flex items-center gap-4">
+            <span class="w-8 text-[10px] tracking-[0.2em] uppercase opacity-60">hue</span>
+            <input
+              type="range"
+              min="0"
+              max="359"
+              [value]="hue()"
+              (input)="onRange('hue', $event)"
+              class="crt-range crt-range-hue min-w-0 flex-1"
+            />
+            <span class="w-9 text-right text-xs text-primary tabular-nums">{{ hue() }}</span>
+          </label>
+
+          <label class="flex items-center gap-4">
+            <span class="w-8 text-[10px] tracking-[0.2em] uppercase opacity-60">sat</span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              [value]="saturation()"
+              (input)="onRange('saturation', $event)"
+              [style.background]="saturationTrack()"
+              class="crt-range min-w-0 flex-1"
+            />
+            <span class="w-9 text-right text-xs text-primary tabular-nums">{{ saturation() }}</span>
+          </label>
+
+          <label class="flex items-center gap-4">
+            <span class="w-8 text-[10px] tracking-[0.2em] uppercase opacity-60">val</span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              [value]="value()"
+              (input)="onRange('value', $event)"
+              [style.background]="valueTrack()"
+              class="crt-range min-w-0 flex-1"
+            />
+            <span class="w-9 text-right text-xs text-primary tabular-nums">{{ value() }}</span>
+          </label>
+        </div>
+      </div>
+
+      <footer
+        class="flex flex-wrap items-center justify-between gap-3 border-t border-primary/25 px-4 py-3 sm:px-6"
+      >
+        <span class="text-[10px] tracking-[0.2em] uppercase">
+          @if (error()) {
+            <span class="text-error">{{ error() }}</span>
+          } @else if (saving()) {
+            <span class="text-primary">zapisywanie...</span>
+          } @else if (dirty()) {
+            <span class="opacity-60">niezapisane zmiany</span>
+          } @else {
+            <span class="opacity-60">zsynchronizowano</span>
+          }
+        </span>
+
+        <div class="flex gap-2">
+          <button
+            type="button"
+            (click)="reset()"
+            [disabled]="!dirty() || saving()"
+            class="btn btn-ghost btn-sm tracking-[0.2em] uppercase"
+          >
+            anuluj
+          </button>
+          <button
+            type="button"
+            (click)="save()"
+            [disabled]="!dirty() || !nicknameValid() || saving()"
+            class="btn btn-outline btn-primary btn-sm tracking-[0.2em] uppercase"
+          >
+            zapisz
+          </button>
+        </div>
+      </footer>
+    } @else {
+      <div class="crt-grid flex min-h-72 items-center justify-center px-4 py-10">
+        <span class="text-[11px] tracking-[0.3em] uppercase opacity-60">brak łączności z kartoteką</span>
+      </div>
+    }
+  </section>
+
+  <!-- Ten sam rozmiar co join / leave lobby — to są działania tej samej klasy. -->
+  <div class="mt-6 flex justify-end">
+    <button
+      type="button"
+      (click)="goBack()"
+      class="btn btn-outline btn-primary btn-md tracking-[0.3em] uppercase"
+    >
+      go back
+    </button>
+  </div>
+</div>

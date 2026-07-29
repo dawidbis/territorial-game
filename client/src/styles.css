@@ -1,0 +1,160 @@
+@import "tailwindcss";
+@plugin "daisyui";
+
+@plugin "daisyui/theme" {
+  name: "crt";
+  default: true;
+  prefersdark: true;
+  color-scheme: dark;
+
+  --color-base-100: oklch(0% 0 0);
+  --color-base-200: oklch(13% 0.02 150);
+  --color-base-300: oklch(19% 0.035 150);
+  --color-base-content: oklch(84% 0.17 150);
+
+  --color-primary: oklch(83% 0.21 148);
+  --color-primary-content: oklch(12% 0.03 148);
+  --color-secondary: oklch(58% 0.12 152);
+  --color-secondary-content: oklch(96% 0.03 152);
+  --color-accent: oklch(93% 0.19 145);
+  --color-accent-content: oklch(13% 0.04 145);
+  --color-neutral: oklch(22% 0.03 150);
+  --color-neutral-content: oklch(84% 0.15 150);
+
+  --color-info: oklch(78% 0.14 180);
+  --color-info-content: oklch(13% 0.03 180);
+  --color-success: oklch(83% 0.21 148);
+  --color-success-content: oklch(12% 0.03 148);
+  --color-warning: oklch(85% 0.16 95);
+  --color-warning-content: oklch(14% 0.04 95);
+  --color-error: oklch(63% 0.22 27);
+  --color-error-content: oklch(13% 0.04 27);
+
+  --radius-selector: 0rem;
+  --radius-field: 0rem;
+  --radius-box: 0rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+body {
+  font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+}
+
+/* Poświata luminoforu. Cień w currentColor, więc działa na dowolnym odcieniu. */
+.crt-glow {
+  text-shadow: 0 0 0.35em currentColor;
+}
+
+/* Poświata wokół panelu — zewnętrzny bloom plus delikatne podświetlenie wnętrza. */
+.crt-panel-glow {
+  box-shadow:
+    0 0 1.25rem -0.4rem var(--color-primary),
+    inset 0 0 1.5rem -1rem var(--color-primary);
+}
+
+/* Siatka plotera pod podgląd mapy. */
+.crt-grid {
+  background-image:
+    linear-gradient(to right, oklch(83% 0.21 148 / 0.1) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(83% 0.21 148 / 0.1) 1px, transparent 1px);
+  background-size: 2.5rem 2.5rem;
+}
+
+/*
+ * Suwaki HSV. Natywny range nie da się ostylować klasami Tailwinda —
+ * potrzebne są pseudo-elementy kciuka, osobno dla WebKita i Gecko
+ * (wspólna reguła byłaby nieprawidłowym selektorem i wypadłaby w całości).
+ */
+.crt-range {
+  appearance: none;
+  height: 0.3rem;
+  cursor: pointer;
+  border: 1px solid oklch(83% 0.21 148 / 0.4);
+  background: oklch(83% 0.21 148 / 0.15);
+}
+
+.crt-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 0.6rem;
+  height: 1.4rem;
+  border: 1px solid oklch(0% 0 0);
+  background: var(--color-primary);
+  box-shadow: 0 0 0.5rem -0.1rem var(--color-primary);
+}
+
+.crt-range::-moz-range-thumb {
+  width: 0.6rem;
+  height: 1.4rem;
+  border: 1px solid oklch(0% 0 0);
+  border-radius: 0;
+  background: var(--color-primary);
+  box-shadow: 0 0 0.5rem -0.1rem var(--color-primary);
+}
+
+.crt-range:focus-visible {
+  outline: 1px solid var(--color-primary);
+  outline-offset: 0.25rem;
+}
+
+/* Odcień jest stały, więc jego tor może być zwykłą tęczą. */
+.crt-range-hue {
+  background: linear-gradient(
+    to right,
+    hsl(0 100% 50%),
+    hsl(60 100% 50%),
+    hsl(120 100% 50%),
+    hsl(180 100% 50%),
+    hsl(240 100% 50%),
+    hsl(300 100% 50%),
+    hsl(359 100% 50%)
+  );
+}
+
+/*
+ * Nakładki kineskopu. Obie są fixed + inset-0, czyli pokrywają dokładnie
+ * widoczny obszar i nie powiększają dokumentu — żadnych pasków przewijania.
+ */
+.crt-screen::before,
+.crt-screen::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Winieta: krawędzie gasną do czerni, środek zostaje czysty. */
+.crt-screen::before {
+  z-index: 55;
+  background: radial-gradient(ellipse at center, transparent 50%, oklch(0% 0 0 / 0.85) 100%);
+}
+
+/* Linie ramki co 3 px. */
+.crt-screen::after {
+  z-index: 60;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0 2px,
+    oklch(0% 0 0 / 0.32) 2px 3px
+  );
+  animation: crt-flicker 4s steps(60) infinite;
+}
+
+@keyframes crt-flicker {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.92;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crt-screen::after {
+    animation: none;
+  }
+}
