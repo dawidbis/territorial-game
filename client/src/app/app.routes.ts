@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 
 import { redirectMembersToLobby } from '../core/guards/lobby-guard';
+import { requireMatchTicket } from '../core/guards/match-guard';
 
 // loadComponent, a nie component: każdy widok jest osobnym chunkiem, więc wejście na
 // stronę główną nie ściąga profilu, poradnika ani lobby.
@@ -13,6 +14,11 @@ export const routes: Routes = [
   {
     path: 'lobby',
     loadComponent: () => import('../features/lobby/lobby').then((m) => m.Lobby),
+  },
+  {
+    path: 'match/:matchId',
+    canActivate: [requireMatchTicket],
+    loadComponent: () => import('../features/match/match').then((m) => m.Match),
   },
   {
     path: 'guide',

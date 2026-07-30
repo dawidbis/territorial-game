@@ -1,0 +1,85 @@
+@if (matches.match(); as match) {
+  <!-- Ten sam łańcuch h-dvh + min-h-0 + overflow-hidden co w lobby: strona nigdy nie
+       przewija się jako całość. Docelowo w tym miejscu siedzi kanwa mapy. -->
+  <div class="flex h-dvh flex-col bg-base-100 pt-16 text-base-content">
+    <main class="mx-auto flex w-full min-h-0 max-w-5xl flex-1 flex-col px-3 py-4 sm:px-6">
+      <h1 class="sr-only">Mecz</h1>
+
+      <section class="flex min-h-0 flex-1 flex-col border border-primary/25 bg-base-200/40">
+        <div class="shrink-0 border-b border-primary/25 px-5 py-4">
+          <p class="crt-glow text-[11px] tracking-[0.3em] text-primary uppercase">
+            match link established
+          </p>
+        </div>
+
+        @if (problem(); as message) {
+          <p
+            role="alert"
+            class="shrink-0 border-b border-warning/40 bg-warning/10 px-4 py-2 text-xs text-warning"
+          >
+            {{ message }}
+          </p>
+        }
+
+        <div class="flex min-h-0 flex-1 flex-col justify-center gap-6 overflow-y-auto px-5 py-8">
+          <dl class="flex flex-col gap-4 text-xs">
+            <div class="flex flex-col gap-1">
+              <dt class="text-[10px] tracking-[0.25em] uppercase opacity-60">match</dt>
+              <dd class="break-all tabular-nums">{{ match.matchId }}</dd>
+            </div>
+
+            <div class="flex flex-col gap-1">
+              <dt class="text-[10px] tracking-[0.25em] uppercase opacity-60">endpoint</dt>
+              <dd class="break-all">{{ match.wsUrl }}</dd>
+            </div>
+
+            <div class="flex flex-col gap-1">
+              <dt class="text-[10px] tracking-[0.25em] uppercase opacity-60">ticket</dt>
+              <dd class="flex items-baseline gap-3">
+                <span
+                  role="timer"
+                  aria-label="Czas ważności biletu"
+                  class="crt-glow text-2xl tracking-[0.15em] text-primary tabular-nums"
+                >
+                  {{ ticketCountdown() }}
+                </span>
+                @if (expired()) {
+                  <span class="text-[10px] tracking-[0.25em] text-warning uppercase">expired</span>
+                }
+              </dd>
+            </div>
+          </dl>
+
+          <p class="max-w-prose text-xs leading-relaxed opacity-70">
+            Tu wejdzie mapa i strumień meczu. Serwer gry jeszcze nie istnieje, więc pod tym
+            adresem nikt nie nasłuchuje — to jest koniec drogi, którą klient potrafi dziś przejść.
+            Bilet wygasa po minucie; odświeżenie strony dobiera nowy, dopóki mecz żyje.
+          </p>
+        </div>
+
+        <footer
+          class="flex shrink-0 flex-wrap items-center justify-between gap-4 border-t border-primary/25 px-4 py-3"
+        >
+          <!-- Odnowienie ma sens dopiero po wygaśnięciu: dopóki bilet jest ważny, serwis
+               oddałby ten sam i przycisk byłby kliknięciem donikąd. -->
+          <button
+            type="button"
+            class="btn btn-outline btn-primary btn-md tracking-[0.3em] uppercase"
+            [disabled]="renewing() || !expired()"
+            (click)="renew()"
+          >
+            {{ renewing() ? 'renewing...' : 'renew ticket' }}
+          </button>
+
+          <button
+            type="button"
+            class="btn btn-outline btn-error btn-md tracking-[0.3em] uppercase"
+            (click)="leave()"
+          >
+            leave match
+          </button>
+        </footer>
+      </section>
+    </main>
+  </div>
+}

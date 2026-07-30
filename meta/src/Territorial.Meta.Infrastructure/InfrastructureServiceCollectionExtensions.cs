@@ -1,8 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Territorial.Meta.Application.Lobbies;
+using Territorial.Meta.Application.Matches;
 using Territorial.Meta.Application.Players;
 using Territorial.Meta.Infrastructure.Lobbies;
+using Territorial.Meta.Infrastructure.Matches;
 using Territorial.Meta.Infrastructure.Persistence;
 using Territorial.Meta.Infrastructure.Persistence.Repositories;
 
@@ -20,9 +22,15 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddDbContext<MetaDbContext>(options => options.UseSqlite(connectionString));
 
         services.AddScoped<IPlayerRepository, EfPlayerRepository>();
+        services.AddScoped<IMatchRepository, EfMatchRepository>();
 
         // Katalog map jest bezstanowy i wpisany na sztywno, więc singleton.
         services.AddSingleton<IMapCatalog, InMemoryMapCatalog>();
+
+        // Atrapa alokatora — dopóki nie ma binarki game-serwera, nie ma czego uruchamiać.
+        // Podmiana na LocalProcessMatchAllocator albo AgentMatchAllocator dotyka tej jednej
+        // linii; reszta systemu widzi wyłącznie IMatchAllocator.
+        services.AddSingleton<IMatchAllocator, FakeMatchAllocator>();
 
         return services;
     }

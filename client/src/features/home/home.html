@@ -50,7 +50,11 @@
       >
         <div class="flex items-baseline gap-3">
           <span class="text-[10px] tracking-[0.3em] uppercase opacity-60">
-            {{ lobby.countdownRunning() ? 'starting in...' : 'standby' }}
+            @if (lobby.allocating()) {
+              allocating server...
+            } @else {
+              {{ lobby.countdownRunning() ? 'starting in...' : 'standby' }}
+            }
           </span>
           <span
             role="timer"

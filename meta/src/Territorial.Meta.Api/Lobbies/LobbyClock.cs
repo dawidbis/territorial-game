@@ -1,11 +1,11 @@
+using Territorial.Meta.Api.Matches;
 using Territorial.Meta.Application.Lobbies;
-using Territorial.Meta.Domain.Lobbies;
 
 namespace Territorial.Meta.Api.Lobbies;
 
 /// <summary>
 /// Jeden zegar na cały system, zamiast timera per lobby — i jedyne miejsce, z którego
-/// wychodzi rozgłoszenie stanu.
+/// wychodzi rozgłoszenie stanu lobby.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -19,6 +19,11 @@ namespace Territorial.Meta.Api.Lobbies;
 /// samej sekundzie to jedna wiadomość do wszystkich zamiast dziesięciu.
 /// </para>
 /// <para>
+/// <b>Zegar nie uruchamia meczu.</b> Zamrożony roster ląduje w kolejce i tyle; alokacją,
+/// biletami i domknięciem lobby zajmuje się <see cref="MatchLauncher"/>. Alokacja to I/O
+/// z ponowieniami, a każde <c>await</c> w tiku zatrzymuje rozgłaszanie dla całego serwisu.
+/// </para>
+/// <para>
 /// <see cref="PeriodicTimer"/> dostaje <see cref="TimeProvider"/>, dzięki czemu w testach
 /// integracyjnych całą dobę pracy zegara da się przewinąć bez czekania.
 /// </para>
@@ -26,6 +31,7 @@ namespace Territorial.Meta.Api.Lobbies;
 public sealed partial class LobbyClock(
     CurrentLobby lobby,
     LobbyBroadcaster broadcaster,
+    MatchStartChannel launches,
     TimeProvider timeProvider,
     ILogger<LobbyClock> logger
 ) : BackgroundService{
@@ -49,42 +55,54 @@ public sealed partial class LobbyClock(
     }
 
     [LoggerMessage(
-        Level = LogLevel.Warning,
-        Message = "Lobby {LobbyId} dobiło do terminu startu, ale alokacja meczu nie jest "
-            + "jeszcze zaimplementowana — nie ma game-serwera, któremu można go oddać. Lobby "
-            + "zostaje zamknięte i otwarte na nowo. To jest miejsce, w które wchodzi wywołanie "
-            + "orkiestratora i rozesłanie biletów (dokument §5③)."
+        Level = LogLevel.Information,
+        Message = "Lobby {LobbyId} weszło w fazę startu z {PlayerCount} graczami. "
+            + "Roster jest zamrożony i czeka na launcher."
     )]
-    private static partial void LogMatchAllocationMissing(ILogger logger, Guid lobbyId);
+    private static partial void LogMatchQueued(ILogger logger, Guid lobbyId, int playerCount);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Tik zegara lobby zakończył się błędem.")]
     private static partial void LogTickFailed(ILogger logger, Exception exception);
 
     private async Task TickAsync()
     {
+        LobbyTickResult result;
+
         try
         {
-            var (tick, snapshot) = lobby.Tick();
-
-            if (snapshot is null)
-            {
-                return;
-            }
-
-            if (tick is LobbyTick.Started)
-            {
-                LogMatchAllocationMissing(logger, snapshot.Header.LobbyId);
-
-                snapshot = lobby.CloseAndReopen();
-            }
-
-            await broadcaster.PublishAsync(snapshot);
+            result = lobby.Tick();
         }
         catch (Exception exception)
         {
-            // Zegar musi przeżyć każdy pojedynczy błąd — inaczej jedna nieudana wysyłka
+            // Zegar musi przeżyć każdy pojedynczy błąd — inaczej jedna nieudana operacja
             // zatrzymuje odliczanie dla całego serwisu aż do restartu.
             LogTickFailed(logger, exception);
+            return;
+        }
+
+        try
+        {
+            // Nagłówek ze stanem "Starting" wychodzi PRZED wpisaniem do kolejki. Przy
+            // szybkiej alokacji launcher zdążyłby inaczej rozgłosić już nowe lobby, a gracze
+            // zobaczyliby kolejność odwróconą: najpierw następne lobby, potem start poprzedniego.
+            if (result.Snapshot is { } snapshot)
+            {
+                await broadcaster.PublishAsync(snapshot);
+            }
+        }
+        catch (Exception exception)
+        {
+            // Nieudane rozgłoszenie NIE może zjeść startu meczu — dlatego wpis do kolejki
+            // jest poza tym blokiem. Lobby jest już zamrożone, a jedynym wyjściem ze stanu
+            // Starting jest launcher; pominięty wpis zostawiłby martwe lobby na zawsze.
+            LogTickFailed(logger, exception);
+        }
+
+        if (result.Start is { } start)
+        {
+            LogMatchQueued(logger, start.LobbyId, start.Roster.Count);
+
+            launches.Enqueue(start);
         }
     }
 }

@@ -1,16 +1,24 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 using Territorial.Meta.Api.Auth;
 using Territorial.Meta.Api.Hubs;
 using Territorial.Meta.Api.Lobbies;
+using Territorial.Meta.Api.Matches;
 using Territorial.Meta.Application.Lobbies;
+using Territorial.Meta.Application.Matches;
 using Territorial.Meta.Application.Players;
 using Territorial.Meta.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
+
+#region Konfiguracja — wczytanie i walidacja
+
+// Wszystko, co pochodzi z konfiguracji, czytane jest w jednym miejscu i PRZED rejestracją
+// serwisów: brakująca albo bezsensowna wartość ma wysadzić start, a nie pierwsze żądanie.
 
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 
@@ -33,6 +41,14 @@ var lobbyOptions =
     builder.Configuration.GetSection(LobbyOptions.SectionName).Get<LobbyOptions>()
     ?? new LobbyOptions();
 
+var matchOptions =
+    builder.Configuration.GetSection(MatchOptions.SectionName).Get<MatchOptions>()
+    ?? new MatchOptions();
+
+#endregion
+
+#region CORS — jawna lista origin-ów, wymuszona przez SignalR
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(
@@ -47,6 +63,10 @@ builder.Services.AddCors(options =>
                 .WithOrigins(allowedOrigins)
     );
 });
+
+#endregion
+
+#region Uwierzytelnianie — token gracza dla REST i dla huba
 
 builder
     .Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -95,6 +115,10 @@ builder
 
 builder.Services.AddAuthorization();
 
+#endregion
+
+#region Transport — REST, OpenAPI, health, SignalR
+
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 builder.Services.AddHealthChecks();
@@ -107,24 +131,61 @@ builder
         options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     );
 
+// Bez tego Clients.User(...) po cichu nie wysyłałoby niczego: domyślny provider czyta
+// ClaimTypes.NameIdentifier, a tożsamość gracza siedzi w claimie 'sub'.
+builder.Services.AddSingleton<IUserIdProvider, PlayerUserIdProvider>();
+
+#endregion
+
+#region Serwisy aplikacji
+
+// Opcje wstrzykiwane jako gotowe obiekty, a nie przez IOptions: są czytane raz na start,
+// nigdy się nie przeładowują, a konstruktory zostają wolne od wiedzy o konfiguracji.
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(jwtOptions);
 builder.Services.AddSingleton(lobbyOptions);
+builder.Services.AddSingleton(matchOptions);
+
 builder.Services.AddSingleton<PlayerTokenService>();
+builder.Services.AddSingleton<MatchTicketService>();
+
+// Jedno lobby na system, więc singleton. Zegar jest jedynym miejscem, z którego wychodzi
+// rozgłoszenie stanu — patrz CurrentLobby i LobbyClock.
 builder.Services.AddSingleton<CurrentLobby>();
 builder.Services.AddSingleton<LobbyBroadcaster>();
 builder.Services.AddHostedService<LobbyClock>();
+
+// Uruchomienie meczu jest świadomie POZA taktem zegara: zegar wpisuje zamrożony roster
+// do kolejki i wraca do tykania, a launcher robi alokację, bilety i domknięcie lobby.
+builder.Services.AddSingleton<MatchStartChannel>();
+builder.Services.AddHostedService<MatchLauncher>();
+
+// Porządki po poprzednim życiu procesu: mecze porzucone w trakcie alokacji.
+builder.Services.AddHostedService<StaleMatchSweeper>();
+
 builder.Services.AddScoped<GetOrCreatePlayer>();
 builder.Services.AddScoped<UpdatePlayerProfile>();
+
+// Baza, repozytoria i katalog map — szczegóły zostają w warstwie infrastruktury.
 builder.Services.AddInfrastructure(connectionString);
+
+#endregion
 
 var app = builder.Build();
 
+#region Pipeline żądania
+
+// CORS przed uwierzytelnianiem: odrzucone preflight-y nie mają po co wchodzić dalej.
 app.UseCors("CorsPolicy");
 
 app.UseAuthentication();
 app.UseAuthorization();
 
+#endregion
+
+#region Endpointy
+
+// Dokumentacja API wyłącznie w dev — na produkcji nie ma powodu publikować schematu.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -134,5 +195,7 @@ if (app.Environment.IsDevelopment())
 app.MapControllers();
 app.MapHub<LobbyHub>("/hubs/lobby");
 app.MapHealthChecks("/api/health");
+
+#endregion
 
 app.Run();

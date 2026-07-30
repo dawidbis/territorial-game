@@ -6,6 +6,7 @@ import { PlayerService } from '../../core/services/player-service';
 import { LobbyBrief } from './lobby-brief';
 import { hsvToCss } from '../../core/color';
 import { formatCountdown } from '../../core/countdown';
+import { ToastService } from '../../core/services/toast-service';
 
 @Component({
   selector: 'app-lobby',
@@ -14,6 +15,7 @@ import { formatCountdown } from '../../core/countdown';
 })
 export class Lobby {
   private router = inject(Router);
+  private toastService = inject(ToastService);
 
   protected hub = inject(LobbyHub);
   protected playerService = inject(PlayerService);
@@ -35,6 +37,14 @@ export class Lobby {
 
   /** Komunikat pokazywany, gdy dołączenie się nie udało. `null` oznacza brak problemu. */
   protected problem = computed(() => {
+    // Nieudany start dotyczy całego lobby, więc jest ważniejszy od własnego wyniku
+    // dołączenia — ten i tak zaraz będzie z nowego lobby.
+    const startProblem = this.hub.startProblem();
+
+    if (startProblem) {
+      return startProblem;
+    }
+
     switch (this.outcome()) {
       case 'Full':
         return 'Lobby jest pełne. Poczekaj na następne — otworzy się zaraz po starcie tego.';

@@ -2,7 +2,7 @@
 
 Jak zamienić zamrożony roster w żywy mecz i doprowadzić do niego każdego gracza.
 
-**Status:** propozycja do zatwierdzenia
+**Status:** etap 1 zrobiony (30.07.2026), etapy 2–4 do zatwierdzenia
 **Zakres:** domknięcie luki nr 1–2 z [dokumentacja-aplikacji.md](dokumentacja-aplikacji.md) §9
 **Podstawa:** [architektura-gry-terytorialnej.md](architektura-gry-terytorialnej.md) — §5③ (alokacja), §9 (orkiestracja), D7, D9, D10, D12, D13, D14
 
@@ -242,16 +242,31 @@ rzadkie — warto ją mieć, zanim wpuścimy prawdziwych graczy.
 
 ## 5. Kolejność wprowadzania
 
-**Etap 1 — bez C++ i bez kryptografii.** `Match` + `MatchParticipant` + migracja, przypisanie
-slotów, `IMatchAllocator` z atrapą, `MatchLauncher` na kanale, `MatchReady` / `MatchStartFailed`,
-własny `IUserIdProvider`, `membershipWanted = false` po `MatchReady`, włączenie
-`Lobby:CountdownEnabled`. Bilet może być na tym etapie nieprzezroczystym stringiem bez podpisu.
+**Etap 1 — bez C++ i bez kryptografii. ✅ ZROBIONY.** `Match` + `MatchParticipant` + migracja,
+przypisanie slotów, `IMatchAllocator` z atrapą, `MatchLauncher` na kanale, `MatchReady` /
+`MatchStartFailed`, własny `IUserIdProvider`, `membershipWanted = false` po `MatchReady`, włączenie
+`Lobby:CountdownEnabled`. Bilet jest nieprzezroczystym stringiem bez podpisu.
 
 Cały etap jest **w pełni testowalny bez jednej linii C++** — i to jest główny argument, żeby zrobić
 go pierwszym. Po nim widać na ekranie, że lobby startuje, wypuszcza graczy i otwiera następne.
 
-**Etap 2 — bilet i wejście.** Podpis (§3.6), endpoint ponownego wydania, trasa `/match/:matchId`
-z guardem i zaślepką zamiast mapy. Klient realnie „wchodzi do gry", tylko gra jest jeszcze pusta.
+> **Czego etap 1 świadomie nie objął.** Zamiatania meczów, które po restarcie meta zostały
+> w stanie `Allocating` (§4, wiersz o restarcie) — wymaga zapytania po stanie i zadania startowego,
+> a nie ma wpływu na ścieżkę, którą etap 1 miał pokazać. Odczyt meczu z bazy dochodzi razem
+> z ponownym wydaniem biletu (§3.7), czyli w etapie 2; dopisany wcześniej byłby kodem, którego
+> nikt nie woła.
+
+**Etap 2 — bilet i wejście. ⏳ ZOSTAJE SAM PODPIS.** Zrobione: endpoint ponownego wydania
+(§3.7), trasa `/match/:matchId` z guardem i zaślepką zamiast mapy, nawigacja z handlera
+`MatchReady`. Klient realnie „wchodzi do gry", tylko gra jest jeszcze pusta, a bilet nadal jest
+nieprzezroczystym ciągiem bez podpisu (§3.6).
+
+> Kolejność wyszła odwrotnie, niż zapowiadał plan, i to celowo: wejście i ponowne wydanie nie
+> czekały na wybór krzywej, a razem z nimi wchodzi cały reconnect. Podpis jest wymianą zawartości
+> `MatchTicketService`, bez dotykania kontraktu wiadomości ani kodu klienta.
+>
+> Przy okazji domknięte zostało zamiatanie meczów zostawionych w `Allocating` (§4) — potrzebowało
+> odczytu z repozytorium, który i tak wchodził razem z ponownym wydaniem biletu.
 
 **Etap 3 — prawdziwa alokacja.** `LocalProcessMatchAllocator`, potem `AgentMatchAllocator`, ciepła
 pula, reaping.
@@ -263,7 +278,11 @@ pula, reaping.
 
 ## 6. Decyzje do podjęcia przed kodowaniem
 
-**6.1 Krzywa podpisu biletu.** Patrz §3.6. Blokuje etap 2, nie blokuje etapu 1.
+**6.1 Krzywa podpisu biletu. ✅ ROZSTRZYGNIĘTE (30.07.2026): ECDSA P-256.** Zero nowych
+zależności po stronie .NET — `ECDsa` jest w BCL — a po stronie C++ wystarczy OpenSSL, który i tak
+wejdzie do obrazu game-serwera. Kosztem jest podpis DER ~70 B zamiast 64 B, czyli raz na mecz nic.
+Ed25519 zostaje wariantem do rozważenia dopiero wtedy, gdy libsodium trafi do obrazu z innych
+powodów. Dokument architektury dostał dopisek — patrz §5③ tamtego dokumentu.
 
 **6.2 Czy `MaxActors` rozdzielić.** Dziś jedno pole — sufit ludzi i botów razem (mapa `moon`: 100).
 Dokument mówi o 10–64 ludziach przy 100–254 aktorach, a komentarz w `MapDefinition` już to

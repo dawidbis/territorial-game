@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import { PlayerService } from '../../core/services/player-service';
 import { ActiveRoute } from '../../core/services/active-route';
 import { hsvToCss } from '../../core/color';
+import { ToastService } from '../../core/services/toast-service';
 
 /** Odpowiednik Nickname.TryCreate z serwera: 3-20 znaków, litery, cyfry, '-' i '_'. */
 const nicknamePattern = /^[\p{L}\p{N}_-]{3,20}$/u;
@@ -15,6 +16,7 @@ const nicknamePattern = /^[\p{L}\p{N}_-]{3,20}$/u;
 })
 export class Profile {
   protected playerService = inject(PlayerService);
+  private toastService = inject(ToastService);
 
   private location = inject(Location);
   private router = inject(Router);
@@ -107,6 +109,8 @@ export class Profile {
           console.error('Nie udało się zapisać profilu.', cause);
         },
       });
+
+      this.toastService.success('profile updated');
   }
 
   /**

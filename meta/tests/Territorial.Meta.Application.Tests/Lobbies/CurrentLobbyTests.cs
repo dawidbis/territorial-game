@@ -15,12 +15,14 @@ public class CurrentLobbyTests
 
     private const int GraceSeconds = 5;
 
+    private const int WindowSeconds = 60;
+
     private sealed class StubMapCatalog : IMapCatalog
     {
         public MapDefinition ForNextLobby() => new("moon", "Moon", MaxActors: 100);
     }
 
-    private static (CurrentLobby Lobby, FakeTimeProvider Time) Create()
+    private static (CurrentLobby Lobby, FakeTimeProvider Time) Create(bool countdown = false)
     {
         var time = new FakeTimeProvider(Start);
 
@@ -29,8 +31,8 @@ public class CurrentLobbyTests
             time,
             new LobbyOptions
             {
-                GatheringSeconds = 60,
-                CountdownEnabled = false,
+                GatheringSeconds = WindowSeconds,
+                CountdownEnabled = countdown,
                 DisconnectGraceSeconds = GraceSeconds,
             }
         );
@@ -165,6 +167,78 @@ public class CurrentLobbyTests
 
         var snapshot = lobby.Tick().Snapshot.ShouldNotBeNull();
         snapshot.Players.ShouldHaveSingleItem().Nickname.ShouldBe("Alicja");
+    }
+
+    [Fact]
+    public void Tick_OnStart_HandsOverTheFrozenRoster()
+    {
+        var (lobby, time) = Create(countdown: true);
+
+        // Sekunda przerwy między dołączeniami, żeby kolejność wynikała z JoinedAt.
+        // Przy identycznym znaczniku roster rozstrzyga remis identyfikatorem, a porządek
+        // Guidów nie odpowiada kolejności ich powstawania — test byłby migotliwy.
+        var alice = JoinPlayer(lobby, "c1", "Alice");
+        time.Advance(TimeSpan.FromSeconds(1));
+        var bob = JoinPlayer(lobby, "c2", "Bob");
+
+        time.Advance(TimeSpan.FromSeconds(WindowSeconds));
+
+        var result = lobby.Tick();
+
+        result.Tick.ShouldBe(LobbyTick.Started);
+        result.Snapshot.ShouldNotBeNull().Header.State.ShouldBe(nameof(LobbyState.Starting));
+
+        var start = result.Start.ShouldNotBeNull();
+        start.Map.MaxActors.ShouldBe(100);
+        start.Roster.Select(p => p.PlayerId).ShouldBe([alice, bob]);
+    }
+
+    [Fact]
+    public void Tick_AfterStart_KeepsTheRosterUntilSomebodyUsesIt()
+    {
+        var (lobby, time) = Create(countdown: true);
+        JoinPlayer(lobby, "c1", "Alice");
+
+        time.Advance(TimeSpan.FromSeconds(WindowSeconds));
+        lobby.Tick();
+
+        // Zegar NIE domyka lobby — robi to launcher, gdy zużyje roster. Gdyby domykał,
+        // zamrożona lista zniknęłaby, zanim ktokolwiek zrobiłby z niej mecz.
+        var afterwards = lobby.Tick();
+
+        afterwards.Tick.ShouldBe(LobbyTick.Idle);
+        afterwards.Start.ShouldBeNull();
+        lobby.Snapshot().Header.PlayerCount.ShouldBe(1);
+        lobby.Snapshot().Header.State.ShouldBe(nameof(LobbyState.Starting));
+    }
+
+    [Fact]
+    public void Tick_WithNobodyWaiting_RestartsTheWindowInsteadOfStarting()
+    {
+        var (lobby, time) = Create(countdown: true);
+
+        time.Advance(TimeSpan.FromSeconds(WindowSeconds));
+
+        var result = lobby.Tick();
+
+        result.Tick.ShouldBe(LobbyTick.WindowReset);
+        result.Start.ShouldBeNull();
+    }
+
+    [Fact]
+    public void CloseAndReopen_OpensAnEmptyLobbyWithANewIdentity()
+    {
+        var (lobby, time) = Create(countdown: true);
+        JoinPlayer(lobby, "c1", "Alice");
+
+        time.Advance(TimeSpan.FromSeconds(WindowSeconds));
+        var started = lobby.Tick().Snapshot.ShouldNotBeNull();
+
+        var reopened = lobby.CloseAndReopen();
+
+        reopened.Header.LobbyId.ShouldNotBe(started.Header.LobbyId);
+        reopened.Header.State.ShouldBe(nameof(LobbyState.Gathering));
+        reopened.Header.PlayerCount.ShouldBe(0);
     }
 
     [Fact]

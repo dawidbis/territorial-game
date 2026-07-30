@@ -1,4 +1,5 @@
 using Territorial.Meta.Application.Lobbies.Contracts;
+using Territorial.Meta.Application.Matches;
 using Territorial.Meta.Application.Players.Contracts;
 using Territorial.Meta.Domain.Lobbies;
 using Territorial.Meta.Domain.Players;
@@ -182,8 +183,12 @@ public sealed class CurrentLobby
     /// Jedyne miejsce, z którego wychodzi rozgłoszenie. Wołane przez zegar raz na sekundę:
     /// zamiata wygasłe karencje, popycha lobby i oddaje snapshot, jeśli jest co pokazać.
     /// </summary>
-    /// <returns><c>Snapshot</c> niepusty dokładnie wtedy, gdy stan zmienił się od ostatniego tiku.</returns>
-    public (LobbyTick Tick, LobbySnapshot? Snapshot) Tick()
+    /// <remarks>
+    /// Przy wejściu w fazę startu razem ze snapshotem wychodzi <see cref="MatchStartRequest"/>
+    /// z rosterem zamrożonym pod tym samym lockiem. Bez tego launcher musiałby wrócić po
+    /// roster osobnym wywołaniem — a między jednym a drugim lobby zdążyłoby się zmienić.
+    /// </remarks>
+    public LobbyTickResult Tick()
     {
         lock (gate)
         {
@@ -198,14 +203,19 @@ public sealed class CurrentLobby
                 dirty = true;
             }
 
+            var start =
+                tick is LobbyTick.Started
+                    ? new MatchStartRequest(lobby.Id, lobby.Map, lobby.Mode, lobby.Roster())
+                    : null;
+
             if (!dirty)
             {
-                return (tick, null);
+                return new LobbyTickResult(tick, null, start);
             }
 
             dirty = false;
 
-            return (tick, Capture());
+            return new LobbyTickResult(tick, Capture(), start);
         }
     }
 

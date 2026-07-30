@@ -53,7 +53,11 @@
       >
         <div class="flex items-baseline gap-3">
           <span class="text-[10px] tracking-[0.3em] uppercase opacity-60">
-            {{ hub.countdownRunning() ? 'starting in...' : 'standby' }}
+            @if (hub.allocating()) {
+              allocating server...
+            } @else {
+              {{ hub.countdownRunning() ? 'starting in...' : 'standby' }}
+            }
           </span>
           <span
             role="timer"

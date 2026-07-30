@@ -12,6 +12,12 @@ import { LobbyHub } from '../core/services/lobby-hub';
  */
 const fullBleedRoutes = new Set(['/', '/lobby']);
 
+/** Prefiksy tras pełnoekranowych z parametrem — dokładne dopasowanie by ich nie złapało. */
+const fullBleedPrefixes = ['/match/'];
+
+const isFullBleed = (path: string) =>
+  fullBleedRoutes.has(path) || fullBleedPrefixes.some((prefix) => path.startsWith(prefix));
+
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet, Nav],
@@ -25,5 +31,5 @@ export class App {
   // trasy, żeby wejście na profil czy poradnik nie wypisywało gracza z lobby.
   private lobby = inject(LobbyHub);
 
-  protected contained = computed(() => !fullBleedRoutes.has(this.route.path()));
+  protected contained = computed(() => !isFullBleed(this.route.path()));
 }

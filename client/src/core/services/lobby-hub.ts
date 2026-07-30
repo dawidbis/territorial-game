@@ -1,4 +1,5 @@
 import { computed, DestroyRef, inject, Service, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import {
   HubConnection,
   HubConnectionBuilder,
@@ -9,6 +10,8 @@ import { lastValueFrom } from 'rxjs';
 
 import { environment } from '../../environments/environment';
 import { JoinResult, LobbyHeader, LobbyRoster } from '../../types/lobby';
+import { MatchReady, MatchStartFailed } from '../../types/match';
+import { MatchGateway } from './match-gateway';
 import { PlayerService } from './player-service';
 import { ServerClock } from './server-clock';
 
@@ -33,10 +36,13 @@ const reconnectDelayMs = 3000;
 export class LobbyHub {
   private players = inject(PlayerService);
   private clock = inject(ServerClock);
+  private matches = inject(MatchGateway);
+  private router = inject(Router);
 
   private headerState = signal<LobbyHeader | null>(null);
   private rosterState = signal<LobbyRoster | null>(null);
   private statusState = signal<HubStatus>('connecting');
+  private startProblemState = signal<string | null>(null);
 
   /** Czy gracz chce siedzieć w lobby. Steruje powrotem po reconnekcie i po zmianie lobby. */
   private membershipWanted = signal(false);
@@ -47,6 +53,9 @@ export class LobbyHub {
 
   header = this.headerState.asReadonly();
   status = this.statusState.asReadonly();
+
+  /** Powód nieudanego startu poprzedniego lobby. Znika, gdy zaczyna się kolejny start. */
+  startProblem = this.startProblemState.asReadonly();
 
   /** Lista graczy — pusta, dopóki roster nie dotyczy oglądanego lobby. */
   roster = computed(() => {
@@ -75,8 +84,15 @@ export class LobbyHub {
     return Math.max(0, Math.ceil((Date.parse(header.startsAt) - this.clock.now()) / 1000));
   });
 
-  /** Czy licznik faktycznie biegnie — póki nie ma game-serwera, stoi. */
+  /** Czy licznik faktycznie biegnie — przy wyłączonym odliczaniu stoi. */
   countdownRunning = computed(() => this.headerState()?.startsAt !== null);
+
+  /**
+   * Czy lobby jest w fazie startu, czyli między zamrożeniem rostera a przydzieleniem
+   * serwera. Trwa kilka sekund i wymaga własnego komunikatu — licznik stoi wtedy na zerze,
+   * co bez wyjaśnienia wygląda jak zawieszony serwis.
+   */
+  allocating = computed(() => this.headerState()?.state === 'Starting');
 
   joined = computed(() => {
     const playerId = this.players.playerProfile()?.id;
@@ -101,6 +117,10 @@ export class LobbyHub {
    */
   async join(): Promise<JoinOutcome> {
     this.membershipWanted.set(true);
+
+    // Wejście do kolejki jest rezygnacją z przydzielonego wcześniej meczu — inaczej gracz
+    // siedziałby w lobby na następny mecz, trzymając w ręku bilet do trwającego.
+    this.matches.release();
 
     await this.connect();
 
@@ -171,6 +191,11 @@ export class LobbyHub {
 
     connection.on('LobbyHeader', (header: LobbyHeader) => this.onHeader(header));
     connection.on('LobbyRoster', (roster: LobbyRoster) => this.rosterState.set(roster));
+    connection.on('MatchReady', (match: MatchReady) => this.onMatchReady(match));
+
+    connection.on('MatchStartFailed', (failure: MatchStartFailed) =>
+      this.startProblemState.set(failure.reason),
+    );
 
     connection.onreconnecting(() => this.statusState.set('connecting'));
 
@@ -217,11 +242,38 @@ export class LobbyHub {
     }
   }
 
+  /**
+   * Gracz dostał slot w meczu.
+   *
+   * Kolejność ma znaczenie: `membershipWanted` gasi się PRZED czymkolwiek innym, bo
+   * nagłówek nowego lobby może przyjść w tej samej sekundzie, a gracz wpuszczony do meczu
+   * nie może wrócić do kolejki na następny — byłby jednocześnie w meczu i w lobby.
+   *
+   * Nawigacja wychodzi stąd, a nie z widoku lobby, bo hub żyje w `App`: zaproszenie musi
+   * zadziałać także wtedy, gdy gracz czeka na profilu albo w poradniku.
+   */
+  private onMatchReady(match: MatchReady) {
+    this.membershipWanted.set(false);
+    this.rosterState.set(null);
+    this.startProblemState.set(null);
+
+    this.matches.assign(match);
+
+    void this.router.navigate(['/match', match.matchId]);
+  }
+
   private onHeader(header: LobbyHeader) {
     const previousLobbyId = this.headerState()?.lobbyId;
 
     this.clock.sync(header.serverNow);
     this.headerState.set(header);
+
+    // Zaczyna się kolejny start, więc komunikat o poprzednim, nieudanym, przestaje
+    // cokolwiek znaczyć. Kasowanie go wcześniej — przy otwarciu nowego lobby — dawałoby
+    // mignięcie, bo nowe lobby przychodzi ułamek sekundy po awarii.
+    if (header.state === 'Starting') {
+      this.startProblemState.set(null);
+    }
 
     if (!previousLobbyId || previousLobbyId === header.lobbyId) {
       return;
