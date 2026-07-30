@@ -4,8 +4,6 @@
 # Pipeline wchodzi razem z etapem E1 (decyzja 6.7), zanim pojawi się test determinizmu
 # z §8 dokumentu architektury — bo to on jest prawdziwym powodem, żeby CI istniało,
 # a dopisanie budowy C++ z vcpkg do gotowego pipeline'u po roku jest osobną robotą.
-#
-# Repozytorium nie ma jeszcze zdalnego origin, więc workflow czeka na pierwszy push.
 name: gameserver
 
 on:
@@ -14,61 +12,77 @@ on:
   pull_request:
 
 jobs:
-  build:
-    name: ${{ matrix.preset }}
-    runs-on: ${{ matrix.os }}
+  windows:
+    name: windows-ninja
+    runs-on: windows-latest
 
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            preset: windows-msvc
-            cache-path: ~\AppData\Local\vcpkg\archives
-          - os: ubuntu-latest
-            preset: linux-gcc
-            cache-path: ~/.cache/vcpkg/archives
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Przypnij vcpkg do baseline'u z manifestu
+        shell: bash
+        run: |
+          baseline=$(grep -o '"builtin-baseline": "[^"]*"' gameserver/vcpkg.json | cut -d'"' -f4)
+          git -C "$VCPKG_INSTALLATION_ROOT" fetch --depth 1 origin "$baseline"
+          git -C "$VCPKG_INSTALLATION_ROOT" checkout --force --detach FETCH_HEAD
+          echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
+
+      - name: Cache pakietów vcpkg
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\vcpkg\archives
+          key: vcpkg-windows-${{ hashFiles('gameserver/vcpkg.json') }}
+          restore-keys: vcpkg-windows-
+
+      # Jeden krok, bo środowisko Visual Studio nie przechodzi między krokami, a Ninja
+      # bez niego nie znajdzie kompilatora. Wersję VS wskazuje vswhere zamiast nazwy
+      # generatora — „Visual Studio 17 2022" wpisane na sztywno przestaje działać w dniu,
+      # w którym obraz runnera dostaje nowszy Visual Studio.
+      - name: Budowa i testy
+        shell: cmd
+        working-directory: gameserver
+        run: |
+          set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+          for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          cmake --preset windows-ninja || exit /b 1
+          cmake --build --preset windows-ninja || exit /b 1
+          ctest --preset windows-ninja || exit /b 1
+
+  linux:
+    name: linux-gcc
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Ninja
-        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
-      # Runnery mają vcpkg wgrane; wskazujemy je zamiast klonować drugą kopię.
-      - name: Wskaż vcpkg
-        shell: bash
-        run: echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
-
-      # Kopia vcpkg na runnerze jest przypięta do własnego commita i nie musi znać naszego
-      # baseline'u — a wtedy konfiguracja pada, zanim cokolwiek się zbuduje. Numer czytamy
-      # z manifestu, żeby nie było dwóch miejsc, które trzeba pamiętać.
-      - name: Dociągnij baseline vcpkg
-        shell: bash
+      - name: Przypnij vcpkg do baseline'u z manifestu
         run: |
           baseline=$(grep -o '"builtin-baseline": "[^"]*"' gameserver/vcpkg.json | cut -d'"' -f4)
           git -C "$VCPKG_INSTALLATION_ROOT" fetch --depth 1 origin "$baseline"
+          git -C "$VCPKG_INSTALLATION_ROOT" checkout --force --detach FETCH_HEAD
+          echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
 
-      # Bez tego każda budowa kompiluje Boost i protobuf od zera — kilkadziesiąt minut.
       - name: Cache pakietów vcpkg
         uses: actions/cache@v4
         with:
-          path: ${{ matrix.cache-path }}
-          key: vcpkg-${{ matrix.os }}-${{ hashFiles('gameserver/vcpkg.json') }}
-          restore-keys: vcpkg-${{ matrix.os }}-
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-linux-${{ hashFiles('gameserver/vcpkg.json') }}
+          restore-keys: vcpkg-linux-
 
       - name: Konfiguracja
         working-directory: gameserver
-        run: cmake --preset ${{ matrix.preset }}
+        run: cmake --preset linux-gcc
 
       - name: Budowa
         working-directory: gameserver
-        run: cmake --build --preset ${{ matrix.preset }}
+        run: cmake --build --preset linux-gcc
 
       - name: Testy
         working-directory: gameserver
-        run: ctest --preset ${{ matrix.preset }}
+        run: ctest --preset linux-gcc
 
   proto:
     name: codegen klienta
