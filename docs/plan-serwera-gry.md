@@ -229,10 +229,91 @@ Dwie rzeczy przy okazji:
 **Pliku mapy nie ma.** Format `.tmap` z D13 jest opisany, ale nikt nie wygenerował ani jednego
 bajtu, a bez terenu nie ma keyframe'a, czyli nie ma czego udowodnić.
 
-`tools/tmapgen` — narzędzie w tym samym projekcie CMake, dzielące nagłówek z czytnikiem. Generuje
-`moon.tmap` 2000×1000 deterministycznie z podanego ziarna. Wersja w C# byłaby wygodniejsza (dotnet
-już jest w pętli), ale wtedy format ma dwie niezależne implementacje i rozjedzie się przy pierwszej
-zmianie nagłówka.
+#### Źródłem mapy są dwa pliki, a `.tmap` jest wynikiem
+
+```
+maps/moon.png     siatka terenu, 1 piksel = 1 kafelek, dokładnie 4 kolory   ← źródło
+maps/moon.json    wszystko, czego obrazek nie umie wyrazić                  ← źródło
+maps/moon.tmap    wynik konwersji, 2 MB                                     ← artefakt, .gitignore
+```
+
+Siatka jest obrazkiem, bo to dwa miliony wartości: w JSON-ie zajęłyby ponad 4 MB tekstu i tak czy
+inaczej nikt by ich ręcznie nie poprawił, a PNG waży kilkadziesiąt kilobajtów, otwiera się w każdym
+edytorze i **widać na nim, co się rysuje**. Reszta idzie JSON-em, bo obrazek nie ma jak jej wyrazić:
+
+```json
+{
+  "id": "moon",
+  "name": "Moon",
+  "maxActors": 100,
+  "spawns": [[412, 233], [1620, 880]]
+}
+```
+
+Wymiarów ani sumy kontrolnej tu nie ma **celowo** — wychodzą z obrazka i z `.tmap`, a wpisane drugi
+raz zaczęłyby kłamać przy pierwszej zmianie mapy. To dokładnie ta reszta, której potrzebuje
+`MapDefinition` z §4.2 dokumentu architektury.
+
+#### Cztery typy terenu
+
+Tyle wynika z mechaniki, a nie z upodobania: w v1 istnieje jedna reguła patrząca na teren — koszt
+przejęcia kafelka (otwarta kwestia nr 4). Trzy poziomy lądu to trzy progi kosztu, czyli tyle, ile
+da się dziś odróżnić w rozgrywce. Wody nie dzielimy na ocean i jeziora, bo to rozróżnienie zaczyna
+znaczyć dopiero przy transporcie wodnym, a atak idzie wyłącznie wzdłuż granicy lądowej.
+
+| Kod | Teren | Kolor w źródle | Koszt przejęcia |
+|---|---|---|---|
+| 0 | woda | `#0000FF` | nieprzejezdna, w `owner[]` ląduje jako 255 (D12) |
+| 1 | niziny | `#00FF00` | ×1 |
+| 2 | wyżyny | `#FFFF00` | ×2 |
+| 3 | góry | `#808080` | ×4 |
+
+Kolory źródłowe są czyste i skrajne, bo dobrane pod **precyzję rysowania**, nie pod wygląd — w każdym
+edytorze trafia się w nie bez pipety, a paleta wyświetlania jest osobną sprawą klienta (§3.10).
+Nieznany kolor to błąd konwersji, nie najbliższe dopasowanie: literówka w odcieniu dałaby inaczej
+wyspę tam, gdzie miała być woda.
+
+Bajt na kafelek zostaje mimo czterech typów — rzeki czy lasy zmieszczą się bez zmiany formatu, gdy
+pojawi się mechanika, która je zauważy.
+
+#### Punkty startowe są stałe i należą do mapy
+
+Nie losujemy ich przy starcie meczu. Dokument architektury mówi o tym wprost (§4.2): punkty
+zdefiniowane per mapa dają kontrolę nad balansem, czego losowanie nie da. Konsekwencje są trzy
+i wszystkie są zaletami:
+
+- **Spawnów musi być co najmniej `maxActors`** — sto na mapie `moon` — bo boty startują dokładnie
+  tak samo jak ludzie. Kto stoi na slocie 7, ten zaczyna na spawnie 7, i **to jest cała reguła
+  przypisania**: indeks spawnu to indeks slotu. Nie ma losowania, więc nie ma czego odtwarzać
+  w replayu (D10).
+- **Balans jest własnością pliku, nie kodu.** Zbyt ciasno postawione spawny widać na obrazku
+  i poprawia się je pędzlem, bez dotykania symulacji.
+- Rozstawienie decyduje o pierwszych minutach meczu — kto z kim graniczy, zanim ktokolwiek się
+  rozszerzy. To jest projektowanie mapy w dosłownym sensie.
+
+#### `tmapgen` — konwerter, który sprawdza, a nie tylko przepisuje
+
+Narzędzie w tym samym projekcie CMake, dzielące nagłówek z czytnikiem: format z dwiema niezależnymi
+implementacjami rozjedzie się przy pierwszej zmianie. PNG czyta `stb_image` wrzucone do
+repozytorium — jeden nagłówek, domena publiczna. Port w vcpkg płaciłby za konwerter każdy, kto
+buduje serwer, a konwersja odpala się raz na kilka tygodni.
+
+Mapa łamiąca którąkolwiek z tych reguł nie psuje się przy wczytaniu, tylko w dwunastej minucie
+meczu — i wygląda wtedy jak błąd symulacji. Stąd walidacja przy konwersji:
+
+| Sprawdzenie | Dlaczego |
+|---|---|
+| Nieznany kolor piksela | cicha interpretacja zamieniłaby literówkę w teren |
+| Ląd poza przedziałem 40–60% | przy 2 mln kafelków i 254 aktorach to jest ~4–5 tys. kafelków na gracza |
+| Spawn na wodzie albo poza głównym kontynentem | wyspa bez połączenia to gracz, którego nikt nie zaatakuje i który sam nigdzie nie wyjdzie |
+| Mniej spawnów niż `maxActors` | mecz nie miałby gdzie postawić części botów |
+
+Do czasu, aż powstanie pierwsza narysowana mapa, ten sam program w trybie `--synthetic` generuje
+teren deterministycznie z ziarna. Nie udaje mapy do grania — ma dać keyframe o realistycznym
+rozmiarze, żeby dało się sprawdzić budżet z §7.
+
+**Edytor map wchodzi później i nic z tego nie unieważnia**: pędzle, stawianie spawnów i podgląd
+to osobny kawałek roboty, a jego wynikiem będzie ta sama para plików.
 
 ```
 world.cpp     terrain (do wczytania) + owner[] (2 MB, u8) + slots[]
@@ -335,7 +416,14 @@ z tego podziału — pętla renderowania ma zostać poza cyklem Angulara niezale
 | `imageSmoothingEnabled = false` | **tak** — bez tego zoom daje rozmytą papkę zamiast pikseli |
 | Śledzenie brudnych chunków 128×128 | **nie** — bez delt nie ma czego brudzić; wchodzi razem z nimi |
 | Paleta slotów z `MatchInit.slots[]` | **tak**, choć w szkielecie maluje wyłącznie wodę i pustkowie |
+| Przyciemnianie koloru właściciela terenem | **tak** — patrz niżej, inaczej mapa gubi ukształtowanie |
 | Porównanie `mapSha256` z cache'em | **tak** — to jedyny moment, w którym D13 daje się przetestować |
+
+**Kolor kafelka to kolor właściciela przemnożony przez jasność terenu** (niziny 1,0 / wyżyny 0,85 /
+góry 0,7). Bez tego teren znika z ekranu dokładnie wtedy, gdy jest najbardziej potrzebny: przejęty
+kafelek maluje się kolorem gracza, więc po kilku minutach połowa mapy to płaskie plamy i nie widać,
+którędy opłaca się rozszerzać. Kosztuje to jedną tablicę — 254 sloty × 4 typy terenu policzone raz
+przy `MatchInit`, a w pętli renderowania zostaje jedno indeksowanie.
 
 Reconnect po stronie klienta jest **funkcjonalnością szkieletu**, nie dodatkiem: zerwane połączenie
 → `ensureTicket` (już istnieje) → nowy WS → keyframe → dalej ta sama mapa. Ścieżka po stronie meta
@@ -428,7 +516,8 @@ stronie meta i weryfikacja offline po stronie C++. Klient testowy w `client/tool
 > Klient testowy stoi w `client/tools/`, a nie w `gameserver/tools/` jak zapowiadał plan: używa
 > codegenu i `node_modules` klienta, więc osobny projekt npm byłby drugą kopią tego samego.
 
-**E3 — świat i keyframe.** `tmapgen`, wczytanie terenu, `owner[]`, sloty z manifestu, boty z ziarna,
+**E3 — świat i keyframe.** `tmapgen` (konwersja PNG + JSON → `.tmap`, walidacja, tryb
+`--synthetic`), wczytanie terenu, `owner[]`, sloty z manifestu, boty z ziarna, punkty startowe,
 `MatchInit` + keyframe RLE, `PublicState` co 1 Hz, gaszenie procesu.
 *Dowód:* testowy klient dostaje keyframe i liczy runy; rozmiar zgadza się z §7 (60–80 KB).
 
@@ -460,9 +549,21 @@ musi działać, żeby projekt się zbudował, tym lepiej.
 meta" wprowadza zależność od meta w ścieżce startu meczu, czyli dokładnie to, czego zabrania §4.3.
 Argumenty wiersza poleceń odpadają, bo nicki graczy trafiłyby do listy procesów całej maszyny.
 
-**6.3 Kto generuje `.tmap`. ✅ Narzędzie C++ w tym samym projekcie**, dzielące nagłówek
-z czytnikiem. Wersja w C# jest wygodniejsza dokładnie do chwili, w której format się zmieni —
+**6.3 Skąd bierze się mapa. ✅ Konwerter, nie generator** (§3.6). Źródłem jest para plików —
+`moon.png` z siatką terenu w czterech kolorach i `moon.json` z punktami startowymi — a `.tmap`
+jest artefaktem konwersji. Narzędzie stoi w tym samym projekcie CMake i dzieli nagłówek
+z czytnikiem: wersja w C# jest wygodniejsza dokładnie do chwili, w której format się zmieni,
 a wtedy dwie niezależne implementacje rozjeżdżają się po cichu.
+
+Generacja proceduralna odpada nie z lenistwa, tylko dlatego, że dokument architektury opiera balans
+na ręcznie postawionych punktach startowych (§4.2). Tryb `--synthetic` istnieje wyłącznie po to,
+żeby E3 miało jakiekolwiek bajty, zanim powstanie pierwsza narysowana mapa.
+
+> **Do rozstrzygnięcia (gameplay).** Czy góry są przejezdne i czy progi kosztu 1/2/4 są właściwe.
+> Rekomendacja: **przejezdne** — nieprzejezdne przy ataku „po całej szerokości granicy" potrafią
+> zostawić gracza z frontem bez ani jednego prawidłowego kafelka, a zamknięte kieszenie mapy to
+> zmarnowane sloty. Koszt ×4 daje ten sam efekt obronny bez tej klasy problemów. Progi wchodzą do
+> symulacji deterministycznej, więc ich zmiana po pierwszych replayach je unieważni.
 
 **6.4 Czy `mmap` teraz. ✅ Nie** — interfejs `TerrainSource` i zwykły odczyt. Jedyna korzyść
 (współdzielona page cache) pojawia się przy wielu procesach na jednym hoście, czyli razem
