@@ -3,8 +3,8 @@
 Opis **tego, co jest faktycznie zaimplementowane** w repozytorium — funkcjonalności, kontrakty,
 konfiguracja, uruchomienie.
 
-**Status:** v1 pre-alpha (meta-serwer + klient; serwer gry — szkielet bez gniazda)
-**Aktualność:** 30.07.2026
+**Status:** v1 pre-alpha (meta-serwer + klient; serwer gry przyjmuje graczy, ale nie ma świata)
+**Aktualność:** 31.07.2026
 
 > **Relacja do drugiego dokumentu.** [architektura-gry-terytorialnej.md](architektura-gry-terytorialnej.md)
 > opisuje **projekt docelowy** — symulację w C++, protobuf, delty kafelków, orkiestrację. Ten
@@ -19,13 +19,13 @@ Działającą **poczekalnią przed meczem**: gracz wchodzi na stronę, dostaje t
 rejestracji, ustawia nick i kolor, dołącza do lobby i widzi na żywo, kto jeszcze czeka. Gdy licznik
 dobija do zera, lobby zamraża roster, zakłada mecz, rozdaje bilety i otwiera następne lobby.
 
-Czego **nie ma**: samego meczu. Nie istnieje mapa, symulacja ani ekspansja terytorium. Ścieżka
-startu kończy się w chwili, gdy gracz ma w ręku adres i bilet — pod tym adresem nikt jeszcze nie
-nasłuchuje, bo alokator jest atrapą (patrz §4.9).
+Czego **nie ma**: samej rozgrywki. Nie istnieje mapa, symulacja ani ekspansja terytorium.
 
-Serwer gry ma od 30.07.2026 **szkielet**: proces w C++, zegar meczu 10/5 Hz i wspólny kontrakt
-protobuf, który generuje się także dla klienta. Gniazda jeszcze nie ma, więc na razie niczego nie
-zmienia dla gracza — plan doprowadzenia go do mapy na ekranie opisuje
+Serwer gry ma od 31.07.2026 **działające wejście**: proces w C++ przyjmuje połączenie
+WebSocketem, weryfikuje podpisany bilet bez pytania meta o zdanie i wysyła snapshoty 5 Hz —
+puste, bo nie ma jeszcze świata, który mógłby się w nich zmienić (§4.15). Brakuje ostatniego
+ogniwa automatyzacji: alokator jest wciąż atrapą (§4.9), więc proces meczu trzeba na razie
+uruchomić ręcznie i podać klientowi adres. Plan doprowadzenia gracza do mapy na ekranie opisuje
 [plan-serwera-gry.md](plan-serwera-gry.md).
 
 ### 1.1 Mapa stanu implementacji
@@ -39,11 +39,14 @@ zmienia dla gracza — plan doprowadzenia go do mapy na ekranie opisuje
 | Odliczanie + synchronizacja zegara klienta | **gotowe**, włączone |
 | Karencja rozłączenia, obsługa wielu kart | **gotowe** |
 | Cykl życia lobby (zbieranie → start → zamknięcie) | **gotowe** i osiągalne |
-| Start meczu: sloty, zapis meczu, bilety, nowe lobby | **gotowe** (etap 1 planu alokacji) |
+| Start meczu: sloty, zapis meczu, bilety, nowe lobby | **gotowe** (etapy 1–2 planu alokacji) |
 | Trasa `/match/:matchId`, guard, ponowne wydanie biletu | **gotowe** |
 | Persystencja gracza i meczu (EF Core + SQLite) | **gotowe** |
 | Widoki `guide` i `contact` | **zaślepki** („in progres...") |
-| Widok meczu | **zaślepka** — adres, licznik biletu, bez mapy |
+| Widok meczu | **zaślepka** — adres, licznik biletu, bez mapy i bez połączenia z procesem |
+| Wejście do meczu: WebSocket, weryfikacja biletu, snapshoty | **gotowe** po stronie serwera (§4.15) |
+| Klient testowy meczu (Node, bez przeglądarki) | **gotowe** |
+| Pipeline CI (serwer gry, dwie platformy) | **gotowe** (§6.4) |
 | Katalog map | jedna pozycja wpisana na sztywno |
 | Alokacja procesu game-serwera | **atrapa** — zwraca adres z konfiguracji, nic nie uruchamia |
 | Podpis biletu | **gotowe** — JWT ES256 (ECDSA P-256), weryfikowany offline przez serwer gry |
@@ -53,7 +56,7 @@ zmienia dla gracza — plan doprowadzenia go do mapy na ekranie opisuje
 | Testy domeny i warstwy aplikacji | **47 testów, wszystkie zielone** |
 | Testy ścieżki meczu w warstwie API | **26 testów, wszystkie zielone** |
 | Testy serwera gry | **39 testów, wszystkie zielone** |
-| Testy frontendu | **brak** (nietknięty szablon, patrz §8.3) |
+| Testy frontendu | **brak** (nietknięty szablon, patrz §6.5) |
 
 ---
 
@@ -70,12 +73,13 @@ zmienia dla gracza — plan doprowadzenia go do mapy na ekranie opisuje
 ```
 territorial-game/
 ├── client/                       Angular
-│   └── src/
-│       ├── core/                 serwisy, interceptor, guard, funkcje pomocnicze
-│       ├── features/             home, lobby, profile, guide, contact
-│       ├── layout/nav/           nawigacja + plakietka lobby
-│       ├── types/                kontrakty API jako typy TS
-│       └── environments/
+│   ├── src/
+│   │   ├── core/                 serwisy, interceptor, guard, funkcje pomocnicze
+│   │   ├── features/             home, lobby, profile, guide, contact
+│   │   ├── layout/nav/           nawigacja + plakietka lobby
+│   │   ├── types/                kontrakty API jako typy TS
+│   │   └── environments/
+│   └── tools/                    klient testowy meczu (Node, ten sam codegen co aplikacja)
 ├── meta/                         rozwiązanie .NET (Territorial.Meta.slnx)
 │   ├── src/
 │   │   ├── Territorial.Meta.Domain/          czysta domena, zero zależności
@@ -85,6 +89,8 @@ territorial-game/
 │   └── tests/
 ├── gameserver/                   serwer pojedynczego meczu (C++23, CMake + vcpkg)
 │   ├── src/app/                  opcje wiersza poleceń, logowanie
+│   ├── src/meta/                 weryfikacja biletu ES256 (OpenSSL), offline
+│   ├── src/net/                  akceptor i sesja WebSocketa (Boost.Beast, korutyny)
 │   ├── src/tick/                 zegar meczu (korutyna): 10 Hz sim / 5 Hz wysyłka
 │   └── tests/                    GoogleTest
 ├── proto/                        game.proto — wspólny kontrakt meczu (D2)
@@ -140,7 +146,12 @@ Management), razem z dwoma wymuszonymi podniesieniami zależności przechodnich 
    klient:  zapis biletu w pamięci, nawigacja na /match/{matchId}
    guard:   po odświeżeniu strony dobiera bilet przez POST /api/matches/{id}/ticket
 
-⑦ Wyjście
+⑦ Mecz                                                  ⟵ dziś tylko ręcznie, patrz §4.15
+   klient → ws  /match/{matchId}      ClientHello { ticket }
+   proces:  weryfikuje podpis ES256 OFFLINE, bez pytania meta o zdanie
+   proces → Snapshot 5 Hz             na razie sam numer tiku
+
+⑧ Wyjście
    klient → invoke Leave()  →  usunięcie z rostera i z grupy
 ```
 
@@ -394,9 +405,10 @@ oknie — `Starting` staje się wtedy nieosiągalne, co bywa wygodne przy pracy 
 
 ### 4.9 Start meczu: alokacja, bilety, nowe lobby
 
-Etap 1 planu z [plan-alokacji-meczu.md](plan-alokacji-meczu.md): wszystko między „lobby dobiło do
-terminu" a „gracz ma w ręku adres i bilet". Game-serwera nadal nie ma — ścieżka kończy się
-na bilecie.
+Etapy 1 i 2 planu z [plan-alokacji-meczu.md](plan-alokacji-meczu.md): wszystko między „lobby dobiło
+do terminu" a „gracz ma w ręku adres i bilet". Bilet jest **podpisany** (ES256) i po drugiej stronie
+stoi już coś, co go weryfikuje (§4.15) — brakuje wyłącznie uruchomienia procesu, bo alokator jest
+atrapą i oddaje adres wpisany w konfiguracji.
 
 ```
 ① zegar        Lobby.Advance → Starting        roster ZAMROŻONY, Join odbija się o NotGathering
@@ -434,10 +446,18 @@ czyta `ClaimTypes.NameIdentifier`, a tożsamość gracza siedzi w claimie `sub` 
 jest wyłączone). Bez `PlayerUserIdProvider` wysyłka zwracałaby `null` jako identyfikator
 i **po cichu nie robiła nic** — najgorszy rodzaj awarii.
 
-**Bilet nie jest jeszcze podpisany.** Nie ma go kto weryfikować, więc kryptografia dawałaby
-złudzenie ochrony. Wartość jest nieprzezroczystym ciągiem o docelowym ładunku
-(`playerId, matchId, slot, nonce`) i docelowym TTL 60 s; etap 2 podmienia sposób zamknięcia
-ładunku, nie kontrakt wiadomości ani kod klienta.
+**Bilet jest podpisany asymetrycznie** — JWT ES256 (ECDSA P-256) z ładunkiem `playerId`, `matchId`,
+`slot`, `nonce` i TTL 60 s. Asymetria nie jest ozdobą: bilet weryfikuje proces meczu, który nie ma
+i nie ma mieć dostępu do niczego, czym da się podpisywać. Klucz prywatny mieszka w sekretach
+(`Match:TicketPrivateKeyPem`), a **publiczny meta zapisuje przy starcie do pliku** — ręczny eksport
+rozjechałby się z kluczem prywatnym dokładnie wtedy, gdy ten się zmieni.
+
+W środowisku deweloperskim brak skonfigurowanego klucza oznacza klucz generowany na czas życia
+procesu (z ostrzeżeniem w logu); poza dev pusta wartość zatrzymuje start, bo bilety podpisane
+kluczem ginącym przy restarcie to awaria, która ujawnia się dopiero po wdrożeniu.
+
+Dla klienta bilet pozostaje **nieprzezroczystym ciągiem** i podpis niczego w tym nie zmienił —
+`MatchGateway` przechowuje go i odnawia tak samo jak wcześniej.
 
 **Sloty (D12).** `0` to pustkowie, `255` woda, `1..254` aktorzy. Ludzie dostają `1..N`
 w kolejności rostera — a ta jest stabilna (`JoinedAt`, potem `PlayerId`), więc przypisanie da się
@@ -641,6 +661,43 @@ interpolację w logach jako błąd). W dev włączone logowanie komend EF Core.
 
 ---
 
+### 4.15 Serwer gry: wejście do meczu
+
+Osobny proces w C++ (`gameserver/`), jeden na mecz (D7). Etapy E1–E2 z
+[plan-serwera-gry.md](plan-serwera-gry.md): **transport i tożsamość działają, świata nie ma**.
+Proces przyjmuje graczy i wysyła im puste snapshoty z numerem tiku.
+
+```
+gameserver --match-id <guid> --port 5101 --ticket-key <plik.pub> [--max-ticks N]
+
+① nasłuch      ws://127.0.0.1:{port}/match/{matchId}      NIE na 0.0.0.0 (D9)
+② upgrade      ścieżka musi wskazywać mecz tego procesu, inaczej 404 przed negocjacją
+③ ClientHello  weryfikacja biletu OFFLINE: podpis → exp → matchId → slot → nonce
+④ pętla        zegar 10 Hz, snapshot co drugi tik (D3), ten sam bufor dla wszystkich
+⑤ koniec       ramka zamknięcia 1001, proces wraca z kodem 0
+```
+
+**Bilet weryfikowany jest bez kontaktu z meta.** Klucz publiczny wczytywany jest raz, przy starcie,
+i proces nie odpytuje sieci ani razu — restart ASP.NET nie ma prawa zerwać trwających meczów (§4.3
+dokumentu architektury). Nieudana weryfikacja kończy się zamknięciem z kodem `1008` i **jednym
+powodem dla wszystkich przypadków**: rozróżnienie „zły podpis" od „nie ten mecz" mówiłoby
+próbującemu, jak blisko celu jest.
+
+| Zachowanie | Powód |
+|---|---|
+| Kolejka wyjściowa powyżej 256 KB → rozłączenie | przy ~1 KB na snapshot rosnący bufor znaczy, że klient już nie żyje (D4); odbudowa łańcucha delt kosztowałaby keyframe i osobną ścieżkę w kodzie |
+| Drugie połączenie na tym samym slocie wypiera pierwsze | to jest reconnect (D14) w najprostszej postaci — bez tego odświeżenie strony zostawia zombie trzymające slot |
+| `Ping` odsyłany jako `Pong` z niezmienionym znacznikiem | RTT liczy klient, bo przeglądarka nie daje JavaScriptowi dostępu do natywnych ramek ping/pong |
+| Wykrywanie martwych połączeń | ramki ping Beasta, `idle_timeout` 30 s — przeglądarka odpowiada automatycznie, więc nic nie trzeba dokładać |
+
+**Czego proces jeszcze nie robi:** nie wczytuje terenu, nie wysyła `MatchInit` ani keyframe'a, nie
+przyjmuje komend i nie gasi się sam po odejściu ostatniego gracza. To etap E3.
+
+Klient testowy — `npm --prefix client run match` (§8.1) — używa tego samego codegenu protobuf co
+aplikacja, więc sprawdza schemat także od strony TypeScriptu.
+
+---
+
 ## 5. Referencja API
 
 ### 5.1 REST
@@ -816,6 +873,33 @@ rozstrzygnięciem remisu. Sortowanie jest w domenie, a nie w warstwie prezentacj
 lobby, a nie sposobu jego wyświetlenia; bez tego lista skakałaby graczom przed oczami, kolejność
 słownika nie jest gwarantowana.
 
+### 5.5 Protokół meczu — WebSocket i protobuf
+
+Drugi kanał realtime, świadomie inny niż lobby (D11): tam SignalR i JSON dla kilku wiadomości na
+minutę, tu goły WebSocket i protobuf dla strumienia binarnego 5 Hz. Schemat jest **jeden dla obu
+stron** — `proto/game.proto` — a kod generuje się przy budowie: po stronie C++ z CMake, po stronie
+klienta przez `npm run proto:gen`. Do repozytorium nie trafia, bo wersjonowany rozjechałby się ze
+schematem w sposób niewidoczny w diffie.
+
+| Kierunek | Wiadomość | Dziś |
+|---|---|---|
+| C→S | `ClientHello { ticket }` | pierwsza ramka po połączeniu, wymagana |
+| C→S | `Ping { client_time_ms }` | odsyłane jako `Pong` bez zmian |
+| C→S | `Command { seq, attack \| build }` | schemat jest, obsługi nie ma |
+| S→C | `Snapshot { tick, is_keyframe, deltas[], runs[] }` | wysyłany 5 Hz, na razie sam `tick` |
+| S→C | `Pong { client_time_ms, tick }` | odpowiedź na `Ping` |
+| S→C | `MatchInit`, `MyState`, `CommandRejected`, `MatchEnd` | schemat jest, nikt ich jeszcze nie wysyła |
+
+Dwie rzeczy w schemacie są warte uwagi, bo wyglądają na przypadek, a nie są:
+
+- **`TileDeltaGroup` grupuje kafelki po właścicielu i koduje różnice indeksów**, nie same indeksy
+  (D5). Indeks kafelka na mapie 2 mln to 21 bitów, czyli 3 bajty varinta; ekspansja jest
+  przestrzennie ciągła, więc różnice mieszczą się w jednym. Test `ProtoTest` pilnuje, że dwieście
+  sąsiednich kafelków kosztuje poniżej 1,5 B każdy zamiast czterech.
+- **`MyState` jest osobnym wariantem `ServerMsg`**, a nie polem `Snapshot`. To jedyna wiadomość
+  per gracz, więc gdyby siedziała w snapshocie, łamałaby wspólny bufor rozsyłany do wszystkich.
+  W §6 dokumentu architektury jej w `oneof` brakowało — bez tego nie miałaby jak wyjść.
+
 ---
 
 ## 6. Testy
@@ -862,7 +946,7 @@ dotnet test meta/Territorial.Meta.slnx
 - `MarkFailed` jest ciche dla meczu, który już żyje — wołane bywa ze ścieżki obsługi awarii
 - `ParticipantOf` znajduje slot uczestnika i nic nie zwraca dla kogoś z zewnątrz
 
-### 6.2 Ścieżka meczu w warstwie API — 16 testów, wszystkie zielone
+### 6.2 Ścieżka meczu w warstwie API — 26 testów, wszystkie zielone
 
 `MatchLauncherTests` składa prawdziwy launcher, prawdziwe lobby, broadcaster i wystawianie biletów;
 podstawione są wyłącznie porty na zewnątrz (orkiestrator, baza, transport SignalR). Launcher
@@ -885,11 +969,63 @@ identyczne 404; żądanie bez tożsamości kończy się 401 i nie dotyka bazy.
 zapisu, a padnięta baza nie przewraca startu serwisu (samo zamiatanie wyjątek przepuszcza, połyka
 go dopiero hostowany serwis).
 
+`MatchTicketServiceTests` — kształt biletu, czyli to, co czyta strona w C++: podpis weryfikuje się
+kluczem publicznym, ma **64 bajty surowego `R‖S`** zamiast struktury DER (RFC 7518 — gdyby .NET
+zaczął kiedyś wystawiać DER, weryfikacja padłaby po stronie niewidocznej z tego repozytorium),
+komplet claimów się zgadza, zmiana jednego znaku ładunku unieważnia bilet, każdy bilet dostaje
+świeży `nonce`, a klucz spoza krzywej P-256 zatrzymuje start.
+
 Nadal **brak pokrycia** dla uwierzytelniania na poziomie pipeline'u, huba end-to-end i persystencji —
 `WebApplicationFactory<Program>` jest podłączona (`InternalsVisibleTo`), ale nikt jej jeszcze
 nie używa.
 
-### 6.3 Frontend — brak pokrycia
+### 6.3 Serwer gry — 39 testów, wszystkie zielone
+
+GoogleTest, uruchamiane przez `ctest`; cały zestaw schodzi w około sekundę.
+
+`OptionsTest` i `MatchClockTest` — parsowanie argumentów (nieznana opcja zatrzymuje proces, slot
+poza 1..254 odpada) oraz zegar: numeracja tików, podział 10/5 Hz i to, że **anulowanie budzi zegar
+natychmiast**, a nie po upływie kroku.
+
+`ProtoTest` — kontrakt schematu: pełny obieg `MatchInit` i `Snapshot`, koszt `TileDeltaGroup`
+poniżej 1,5 B na kafelek (D5) i `MyState` jako osobna wiadomość.
+
+`TicketTest` — **jedyne miejsce w repozytorium, gdzie obie strony kontraktu spotykają się w jednym
+teście**. Bilety w tych testach nie są wymyślone: wystawił je .NET tymi samymi prymitywami, których
+używa `MatchTicketService`. Sprawdzane jest przyjęcie prawdziwego biletu, odrzucenie podpisanego
+obcym kluczem, podmiana jednego znaku ładunku, wygaśnięcie razem z zapasem na rozjazd zegarów,
+bilet do innego meczu, slot poza zakresem, powtórne użycie tego samego `nonce` i nagłówek bez `alg`.
+
+`SessionTest` — cała droga wejścia z prawdziwym klientem Beasta na porcie efemerycznym: wejście
+biletem i odebranie snapshotu, zamknięcie `1008` przy podrobionym bilecie, odmowa upgrade'u pod
+cudzym `matchId`, wypieranie wcześniejszego połączenia na tym samym slocie oraz rozłączenie
+klienta, który przestał czytać (D4).
+
+### 6.4 Pipeline CI
+
+`.github/workflows/gameserver.yml` — trzy zadania przy każdym pushu na `main` i przy każdym PR:
+budowa i testy serwera gry na Windowsie (MSVC + Ninja) i na Linuksie (GCC + Ninja) oraz generowanie
+kodu z `proto/game.proto` po stronie klienta. Zależności idą z vcpkg, z cache'em pakietów
+kluczowanym po zawartości manifestu.
+
+Dwie rzeczy nieoczywiste, obie kosztowały czerwone przebiegi:
+
+- **vcpkg na runnerze przełączany jest na commit z manifestu**, nie tylko dociągany. Obrazy
+  runnerów mają własne wersje vcpkg; samo pobranie baseline'u zostawia drzewo portów nowsze niż
+  baza wersji i konfiguracja pada na `no version database entry`.
+- **Na Linuksie GCC, nie clang.** Clang 18 nie implementuje P0848, więc definiuje
+  `__cpp_concepts = 201907`, a libstdc++ chowa za tym warunkiem cały nagłówek `<expected>` —
+  niezależnie od wersji libstdc++. Uzasadnienie w [plan-serwera-gry.md](plan-serwera-gry.md),
+  decyzja 6.5.
+
+Windows nie używa generatora Visual Studio, mimo że lokalnie to on jest domyślny (§8.1): nazwa
+wersji wpisana w preset przestaje działać w dniu, w którym obraz runnera dostaje nowszy Visual
+Studio. Zadanie samo znajduje instalację przez `vswhere` i buduje Ninją.
+
+Meta i klient nie mają jeszcze własnych zadań — to jedna linia do dopisania, gdy pojawią się testy
+frontendu (§6.5).
+
+### 6.5 Frontend — brak pokrycia
 
 Jedyny plik testowy (`app.spec.ts`) to **nietknięty szablon** Angulara: sprawdza obecność tekstu
 `Hello, client`, którego w szablonie nie ma, i nie dostarcza `provideRouter` wymaganego przez
@@ -1072,7 +1208,7 @@ Uporządkowane od najbliższego do najdalszego.
 
 | # | Brak | Uwagi |
 |---|---|---|
-| 1 | **Serwer gry** | szkielet (E1) stoi; brakuje gniazda, świata i mapy — etapy E2–E5 z [plan-serwera-gry.md](plan-serwera-gry.md). Sama symulacja to osobny plan |
+| 1 | **Serwer gry** | wejście działa (E1–E2, §4.15); brakuje świata, mapy i renderowania — etapy E3–E5 z [plan-serwera-gry.md](plan-serwera-gry.md). Sama symulacja to osobny plan |
 | 2 | ~~Podpis biletu~~ | **zrobione** — ES256 po obu stronach, etap E2 planu serwera gry |
 | 3 | **Prawdziwa alokacja** | `LocalProcessMatchAllocator`, potem agent na maszynie; dziś atrapa |
 | 4 | Odbiór wyniku meczu | `Internal/` na mTLS, idempotentny zapis po `matchId`; stan `Completed` czeka gotowy |
@@ -1080,7 +1216,7 @@ Uporządkowane od najbliższego do najdalszego.
 | 6 | Konta i logowanie | dziś wyłącznie goście; `Player` jest przygotowany na dowiązanie konta |
 | 7 | PostgreSQL | dziś SQLite; wymiana dotyczy jednej linii w `AddInfrastructure` i migracji |
 | 8 | Testy API end-to-end | `WebApplicationFactory` podłączona, ale nieużywana; patrz §6.2 |
-| 9 | Testy frontendu | patrz §6.3 |
+| 9 | Testy frontendu | patrz §6.5 |
 | 10 | Widoki `guide` i `contact` | zaślepki |
 | 11 | Generowanie klientów HTTP z OpenAPI | typy TS pisane ręcznie |
 | 12 | Skalowanie poziome | stan lobby w pamięci jednej instancji; wymaga backplane, lidera zegara i innego zamiatania meczów |
