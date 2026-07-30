@@ -1000,7 +1000,7 @@ tylko naszego kodu.
 | `windows-msvc` | terminal i CI — generator Visual Studio znajduje kompilator sam |
 | `windows-ninja` | Developer PowerShell, Debug — szybsza budowa przyrostowa |
 | `windows-ninja-release` | to samo z optymalizacją, do mierzenia czasu |
-| `linux-clang` | platforma docelowa (decyzja 6.5 planu serwera gry) |
+| `linux-gcc` | platforma docelowa (decyzja 6.5 planu serwera gry) |
 
 Dwa generatory nie są niekonsekwencją: Ninja wymaga kompilatora na ścieżce, czyli środowiska
 `vcvars`, a generator Visual Studio znajduje go sam i dzięki temu `cmake --preset` działa
@@ -1061,7 +1061,7 @@ budowania i samo przeładowanie go nie naprawi.
 > w drzewie CLion-a go nie widać. Do edycji: **File → Attach Directory to Project** na katalogu
 > `proto/`, albo otwarcie całego repozytorium i „Load CMake Project" na `gameserver/CMakeLists.txt`.
 
-Preset `linux-clang` buduje to samo Ninją i klangiem; jest utrzymywany od pierwszego dnia, bo
+Preset `linux-gcc` buduje to samo Ninją; jest utrzymywany od pierwszego dnia, bo
 produkcja stoi na Linuksie (plan serwera gry, decyzja 6.5).
 
 ---

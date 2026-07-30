@@ -101,7 +101,7 @@ wypełnia (`Command`, `AttackOrder`, `MatchEnd`). Pola są tańsze teraz niż mi
 ```
 gameserver/
 ├── CMakeLists.txt
-├── CMakePresets.json          windows-msvc (terminal, CI), windows-ninja, linux-clang
+├── CMakePresets.json          windows-msvc (terminal, CI), windows-ninja, linux-gcc
 ├── .run/                      wersjonowana konfiguracja uruchomienia dla CLion
 ├── vcpkg.json                 manifest: boost-asio, boost-beast, protobuf, gtest
 │                              (openssl dochodzi w E2, xxhash w E3 — wtedy, gdy są używane)
@@ -468,9 +468,20 @@ a wtedy dwie niezależne implementacje rozjeżdżają się po cichu.
 (współdzielona page cache) pojawia się przy wielu procesach na jednym hoście, czyli razem
 z agentem. Do tego czasu byłby to kod platformowy pisany na zapas.
 
-**6.5 Platformy budowania. ✅ Oba presety od pierwszego dnia** — `windows-msvc` i `linux-clang` —
+**6.5 Platformy budowania. ✅ Oba presety od pierwszego dnia** — `windows-msvc` i `linux-gcc` —
 nawet jeśli linuksowego przez pierwsze tygodnie nikt nie odpali. Przenośność dopisana po roku
 kosztuje wielokrotnie więcej niż utrzymywana od początku.
+
+> **Korekta (31.07.2026): na Linuksie GCC, nie clang.** Pierwszy przebieg CI wywalił się na
+> `std::expected`, którego „nie ma". Przyczyna nie jest tam, gdzie się jej szuka: clang 18 nie
+> implementuje P0848 (warunkowo trywialne funkcje specjalne), więc definiuje
+> `__cpp_concepts = 201907`, a libstdc++ chowa **cały nagłówek `<expected>`** za warunkiem
+> `__cpp_concepts >= 202002`. Nie pomaga ani libstdc++ 14, ani nowszy clang. Z libc++ działa, ale
+> wtedy pod libc++ musiałyby być zbudowane wszystkie zależności z vcpkg — czyli osobny triplet
+> dla jednego nagłówka.
+>
+> GCC 13 kompiluje całość bez ostrzeżeń przy `-Wall -Wextra -Wpedantic`. Clang wraca do rozmowy,
+> gdy nadrobi P0848 — do tego czasu byłby to kompilator, pod który trzeba pisać inaczej.
 
 **6.6 Twardy limit czasu meczu. ✅ 30 minut i twarde wyjście.** D7 obiecuje ≤25 min i na tej
 obietnicy stoi cała strategia deployu („przestań alokować i poczekaj"). Obietnica bez egzekwowania

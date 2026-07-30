@@ -50,10 +50,10 @@
       }
     },
     {
-      "name": "linux-clang",
+      "name": "linux-gcc",
       "inherits": "base",
-      "displayName": "Linux / Clang",
-      "description": "Docelowa platforma produkcyjna. Utrzymywana od pierwszego dnia (decyzja 6.5), nawet zanim ktokolwiek na niej uruchomi serwer.",
+      "displayName": "Linux / GCC",
+      "description": "Docelowa platforma produkcyjna (decyzja 6.5). GCC, nie clang: clang 18 nie implementuje P0848, wiec definiuje __cpp_concepts=201907, a libstdc++ chowa za tym warunkiem caly naglowek <expected>. Szczegoly w planie serwera gry, decyzja 6.5.",
       "generator": "Ninja",
       "condition": {
         "type": "equals",
@@ -62,7 +62,7 @@
       },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_CXX_COMPILER": "g++",
         "VCPKG_TARGET_TRIPLET": "x64-linux"
       }
     }
@@ -82,8 +82,8 @@
       "configurePreset": "windows-ninja-release"
     },
     {
-      "name": "linux-clang",
-      "configurePreset": "linux-clang"
+      "name": "linux-gcc",
+      "configurePreset": "linux-gcc"
     }
   ],
   "testPresets": [
@@ -110,8 +110,8 @@
       }
     },
     {
-      "name": "linux-clang",
-      "configurePreset": "linux-clang",
+      "name": "linux-gcc",
+      "configurePreset": "linux-gcc",
       "output": {
         "outputOnFailure": true
       }

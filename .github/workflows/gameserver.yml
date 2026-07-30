@@ -26,7 +26,7 @@ jobs:
             preset: windows-msvc
             cache-path: ~\AppData\Local\vcpkg\archives
           - os: ubuntu-latest
-            preset: linux-clang
+            preset: linux-gcc
             cache-path: ~/.cache/vcpkg/archives
 
     steps:
@@ -40,6 +40,15 @@ jobs:
       - name: Wskaż vcpkg
         shell: bash
         run: echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
+
+      # Kopia vcpkg na runnerze jest przypięta do własnego commita i nie musi znać naszego
+      # baseline'u — a wtedy konfiguracja pada, zanim cokolwiek się zbuduje. Numer czytamy
+      # z manifestu, żeby nie było dwóch miejsc, które trzeba pamiętać.
+      - name: Dociągnij baseline vcpkg
+        shell: bash
+        run: |
+          baseline=$(grep -o '"builtin-baseline": "[^"]*"' gameserver/vcpkg.json | cut -d'"' -f4)
+          git -C "$VCPKG_INSTALLATION_ROOT" fetch --depth 1 origin "$baseline"
 
       # Bez tego każda budowa kompiluje Boost i protobuf od zera — kilkadziesiąt minut.
       - name: Cache pakietów vcpkg
