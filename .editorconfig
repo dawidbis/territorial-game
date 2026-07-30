@@ -19,6 +19,17 @@ indent_size = 2
 [*.json]
 indent_size = 2
 
+# Schemat protobuf — wspólny dla serwera gry i klienta
+[*.proto]
+indent_size = 2
+insert_final_newline = true
+
+# C++ files — formatowanie pilnuje gameserver/.clang-format, tu tylko podstawy
+[*.{cpp,hpp,h}]
+indent_size = 4
+tab_width = 4
+insert_final_newline = true
+
 # C# files
 [*.cs]
 
@@ -398,3 +409,15 @@ dotnet_naming_style.s_camelcase.capitalization = camel_case
 # Konwencja Metoda_Warunek_Oczekiwanie jest w testach powszechna i czytelniejsza
 # niż PascalCase sklejony w jedno słowo. Reguła zostaje włączona w kodzie produkcyjnym.
 dotnet_diagnostic.CA1707.severity = none
+
+
+##########################################
+# Migracje EF Core
+##########################################
+
+[meta/src/**/Persistence/Migrations/*.cs]
+
+# Pliki generowane przez `dotnet ef migrations add`. Analizatory nie mają tu czego
+# pilnować, a ręczne poprawianie wygenerowanego kodu (np. CA1861 na tablicy kolumn
+# w indeksie złożonym) wracałoby przy każdej kolejnej migracji.
+generated_code = true

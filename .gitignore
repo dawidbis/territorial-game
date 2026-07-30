@@ -488,3 +488,17 @@ $RECYCLE.BIN/
 
 # Certyfikaty deweloperskie wyeksportowane dla ng serve --ssl
 client/ssl/
+
+# Katalogi budowania serwera gry i zależności zaciągnięte przez vcpkg
+gameserver/build/
+vcpkg_installed/
+
+# Profile CMake tworzone przez CLion, gdy ktoś nie użyje presetów
+cmake-build-*/
+
+# Kod generowany z proto/game.proto — powstaje przy budowie po obu stronach.
+# Wersjonowany rozjechałby się ze schematem w sposób niewidoczny w diffie.
+client/src/proto/
+
+# Pliki terenu (D13) — 2 MB binarki wychodzące z tmapgen, nie źródło
+*.tmap

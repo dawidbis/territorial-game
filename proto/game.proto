@@ -1,0 +1,152 @@
+syntax = "proto3";
+
+package game;
+
+// Kontrakt meczu — jedyne źródło prawdy schematu dla C++ i dla klienta (D2).
+//
+// Plik leży poza `gameserver/` i poza `client/` świadomie: należy do obu stron naraz,
+// a trzymany w katalogu jednej z nich stałby się jej własnością. Kod generowany nie
+// wchodzi do repozytorium — po stronie C++ robi to CMake, po stronie klienta `buf`.
+//
+// Odpowiada §6 dokumentu architektury. Wiadomości, których szkielet jeszcze nie
+// wypełnia (komendy, wynik meczu), są tu od razu: pole dopisane teraz kosztuje nic,
+// a dopisane po wypuszczeniu klientów kosztuje migrację.
+
+// ─────────────────────────── Klient → Serwer ───────────────────────────
+
+message ClientMsg {
+  oneof msg {
+    ClientHello hello   = 1;   // pierwsza ramka po połączeniu
+    Command     command = 2;
+    Ping        ping    = 3;
+  }
+}
+
+message ClientHello {
+  string ticket = 1;           // JWT ES256 z meta-serwera
+}
+
+message Command {
+  uint32 seq = 1;
+  oneof order {
+    AttackOrder    attack = 10;
+    BuildCityOrder build  = 11;
+  }
+}
+
+message AttackOrder {
+  uint32 target_slot    = 1;   // 0 = pustkowie
+  uint32 population_pct = 2;   // 1..100
+}
+
+message BuildCityOrder {
+  uint32 tile_index = 1;
+}
+
+// Własna wiadomość aplikacyjna, bo przeglądarka nie daje JavaScriptowi dostępu do
+// natywnych ramek ping/pong WebSocketa. W drugą stronę (serwer → klient) używamy
+// ramki protokołu i detekcja martwych połączeń jest darmowa.
+message Ping {
+  uint64 client_time_ms = 1;   // odsyłane bez zmian, żeby klient policzył RTT sam
+}
+
+// ─────────────────────────── Serwer → Klient ───────────────────────────
+
+message ServerMsg {
+  oneof msg {
+    MatchInit       init     = 1;
+    Snapshot        snapshot = 2;
+    CommandRejected rejected = 3;
+    MatchEnd        end      = 4;
+    Pong            pong     = 5;
+    MyState         my_state = 6;
+  }
+}
+
+message MatchInit {
+  string          map_id      = 1;
+  bytes           map_sha256  = 2;
+  uint32          tick_rate   = 3;   // ticków symulacji na sekundę
+  uint32          your_slot   = 4;
+  uint64          seed        = 5;
+  repeated SlotInfo slots     = 6;
+  uint32          map_width   = 7;
+  uint32          map_height  = 8;
+}
+
+message SlotInfo {
+  uint32 slot      = 1;
+  string name      = 2;
+  uint32 color_rgb = 3;        // konwersję z HSV robi meta — C++ nie zna tej przestrzeni
+  bool   is_bot    = 4;
+}
+
+message Snapshot {
+  uint32 tick        = 1;
+  bool   is_keyframe = 2;
+
+  repeated OwnershipRun   runs   = 3;  // tylko keyframe
+  repeated TileDeltaGroup deltas = 4;  // zwykły tick
+
+  repeated PublicState others = 5;     // co 5. snapshot (1 Hz)
+}
+
+message OwnershipRun {
+  uint32 start_delta = 1;   // różnica od końca poprzedniego runu
+  uint32 length      = 2;
+  uint32 slot        = 3;
+}
+
+// Serce optymalizacji protokołu (D5): właściciel płacony raz na grupę, indeksy
+// posortowane i kodowane różnicami. Ekspansja jest przestrzennie ciągła, więc
+// różnice mieszczą się w jednym bajcie varinta.
+message TileDeltaGroup {
+  uint32 slot = 1;
+  repeated uint32 index_deltas = 2 [packed = true];
+}
+
+message PublicState {
+  uint32 slot            = 1;
+  uint32 territory_tiles = 2;
+}
+
+// Jedyna wiadomość per gracz — łamie wspólny bufor broadcastu, dlatego jest osobnym
+// wariantem `ServerMsg`, a nie polem w `Snapshot`.
+message MyState {
+  uint32 population   = 1;
+  uint32 gold         = 2;
+  uint32 pop_income   = 3;
+  uint32 gold_income  = 4;
+  uint32 attack_force = 5;
+  uint32 cities       = 6;
+}
+
+message CommandRejected {
+  uint32 seq = 1;
+  RejectReason reason = 2;
+}
+
+// Prefiks w nazwach jest wymuszony przez zasięg enumów w proto3 — wartości żyją
+// w przestrzeni nazw pakietu, nie enuma.
+enum RejectReason {
+  REJECT_REASON_UNSPECIFIED      = 0;
+  REJECT_REASON_INVALID_TARGET   = 1;
+  REJECT_REASON_NOT_ENOUGH_GOLD  = 2;
+  REJECT_REASON_NO_SHARED_BORDER = 3;
+  REJECT_REASON_UNKNOWN_ORDER    = 4;
+}
+
+message MatchEnd {
+  repeated Standing standings = 1;
+}
+
+message Standing {
+  uint32 slot            = 1;
+  uint32 place           = 2;   // 1 = zwycięzca
+  uint32 territory_tiles = 3;
+}
+
+message Pong {
+  uint64 client_time_ms = 1;    // echo z Ping
+  uint32 tick           = 2;    // pozwala klientowi zobaczyć, jak daleko jest serwer
+}

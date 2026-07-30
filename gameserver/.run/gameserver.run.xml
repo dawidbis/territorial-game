@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="gameserver (dymny, 50 tików)" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--match-id 018f3a2b-5c7d-7e91-9a2b-3c4d5e6f7a8b --port 5101 --max-ticks 50" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="territorial_gameserver" TARGET_NAME="gameserver" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="territorial_gameserver" RUN_TARGET_NAME="gameserver">
+    <method v="2">
+      <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+    </method>
+  </configuration>
+</component>

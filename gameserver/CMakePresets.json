@@ -1,0 +1,120 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      }
+    },
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "inherits": "base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      }
+    },
+    {
+      "name": "windows-msvc",
+      "inherits": "windows-base",
+      "displayName": "Windows / MSVC (Visual Studio)",
+      "description": "Budowa z dowolnego terminala i z CI: generator Visual Studio znajduje kompilator sam, bez wchodzenia w srodowisko vcvars. CLion tego generatora NIE obsluguje - tam wybierz preset ninja.",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64"
+    },
+    {
+      "name": "windows-ninja",
+      "inherits": "windows-base",
+      "displayName": "Windows / MSVC (Ninja, Debug)",
+      "description": "Preset dla CLion oraz dla Developer PowerShella. Ninja wymaga kompilatora na sciezce - CLion ustawia to sam przez lancuch narzedzi Visual Studio.",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "windows-ninja-release",
+      "inherits": "windows-ninja",
+      "displayName": "Windows / MSVC (Ninja, RelWithDebInfo)",
+      "description": "To samo co windows-ninja, ale z optymalizacja - do mierzenia czegokolwiek, co dotyczy czasu.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "linux-clang",
+      "inherits": "base",
+      "displayName": "Linux / Clang",
+      "description": "Docelowa platforma produkcyjna. Utrzymywana od pierwszego dnia (decyzja 6.5), nawet zanim ktokolwiek na niej uruchomi serwer.",
+      "generator": "Ninja",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "VCPKG_TARGET_TRIPLET": "x64-linux"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-msvc",
+      "configurePreset": "windows-msvc",
+      "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "windows-ninja",
+      "configurePreset": "windows-ninja"
+    },
+    {
+      "name": "windows-ninja-release",
+      "configurePreset": "windows-ninja-release"
+    },
+    {
+      "name": "linux-clang",
+      "configurePreset": "linux-clang"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-msvc",
+      "configurePreset": "windows-msvc",
+      "configuration": "RelWithDebInfo",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-ninja",
+      "configurePreset": "windows-ninja",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-ninja-release",
+      "configurePreset": "windows-ninja-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-clang",
+      "configurePreset": "linux-clang",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

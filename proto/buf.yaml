@@ -1,0 +1,6 @@
+# Moduł dla `buf`, którym klient generuje kod TypeScript. Strona C++ używa protoc
+# z vcpkg i tego pliku nie czyta — jest tu wyłącznie po to, żeby `buf` traktował ten
+# katalog jako korzeń modułu i żeby importy w schemacie były liczone od niego.
+version: v2
+modules:
+  - path: .

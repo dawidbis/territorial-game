@@ -3,7 +3,7 @@
 Opis **tego, co jest faktycznie zaimplementowane** w repozytorium — funkcjonalności, kontrakty,
 konfiguracja, uruchomienie.
 
-**Status:** v1 pre-alpha (meta-serwer + klient; brak serwera gry)
+**Status:** v1 pre-alpha (meta-serwer + klient; serwer gry — szkielet bez gniazda)
 **Aktualność:** 30.07.2026
 
 > **Relacja do drugiego dokumentu.** [architektura-gry-terytorialnej.md](architektura-gry-terytorialnej.md)
@@ -16,11 +16,17 @@ konfiguracja, uruchomienie.
 ## 1. Czym aplikacja jest dzisiaj
 
 Działającą **poczekalnią przed meczem**: gracz wchodzi na stronę, dostaje tożsamość bez
-rejestracji, ustawia nick i kolor, dołącza do lobby i widzi na żywo, kto jeszcze czeka.
+rejestracji, ustawia nick i kolor, dołącza do lobby i widzi na żywo, kto jeszcze czeka. Gdy licznik
+dobija do zera, lobby zamraża roster, zakłada mecz, rozdaje bilety i otwiera następne lobby.
 
-Czego **nie ma**: samego meczu. Nie istnieje mapa, symulacja, ekspansja terytorium ani serwer gry —
-lobby zbiera graczy i na tym się zatrzymuje. Jest to stan świadomy, nie niedokończony: odliczanie
-domyślnie stoi, bo nie ma komu oddać meczu (patrz §5.8).
+Czego **nie ma**: samego meczu. Nie istnieje mapa, symulacja ani ekspansja terytorium. Ścieżka
+startu kończy się w chwili, gdy gracz ma w ręku adres i bilet — pod tym adresem nikt jeszcze nie
+nasłuchuje, bo alokator jest atrapą (patrz §4.9).
+
+Serwer gry ma od 30.07.2026 **szkielet**: proces w C++, zegar meczu 10/5 Hz i wspólny kontrakt
+protobuf, który generuje się także dla klienta. Gniazda jeszcze nie ma, więc na razie niczego nie
+zmienia dla gracza — plan doprowadzenia go do mapy na ekranie opisuje
+[plan-serwera-gry.md](plan-serwera-gry.md).
 
 ### 1.1 Mapa stanu implementacji
 
@@ -30,16 +36,23 @@ domyślnie stoi, bo nie ma komu oddać meczu (patrz §5.8).
 | Profil gracza (nick, kolor HSV) | **gotowe** |
 | Lobby — roster, nagłówek, snapshoty na żywo | **gotowe** |
 | Kanał realtime (SignalR) + zegar rozgłaszania | **gotowe** |
-| Odliczanie + synchronizacja zegara klienta | **gotowe**, wyłączone przełącznikiem |
+| Odliczanie + synchronizacja zegara klienta | **gotowe**, włączone |
 | Karencja rozłączenia, obsługa wielu kart | **gotowe** |
-| Cykl życia lobby (zbieranie → start → zamknięcie) | **gotowe**, nieosiągalne przy wyłączonym odliczaniu |
-| Persystencja gracza (EF Core + SQLite) | **gotowe** |
+| Cykl życia lobby (zbieranie → start → zamknięcie) | **gotowe** i osiągalne |
+| Start meczu: sloty, zapis meczu, bilety, nowe lobby | **gotowe** (etap 1 planu alokacji) |
+| Trasa `/match/:matchId`, guard, ponowne wydanie biletu | **gotowe** |
+| Persystencja gracza i meczu (EF Core + SQLite) | **gotowe** |
 | Widoki `guide` i `contact` | **zaślepki** („in progres...") |
+| Widok meczu | **zaślepka** — adres, licznik biletu, bez mapy |
 | Katalog map | jedna pozycja wpisana na sztywno |
-| Alokacja meczu, bilety, game-serwer | **brak** — miejsce oznaczone logiem ostrzegawczym |
+| Alokacja procesu game-serwera | **atrapa** — zwraca adres z konfiguracji, nic nie uruchamia |
+| Podpis biletu | **brak** — nieprzezroczysty ciąg; decyzja: ECDSA P-256 |
+| Serwer gry — szkielet (etap E1) | **gotowe**: proces, opcje, zegar 10/5 Hz, schemat protobuf, CI |
+| Serwer gry — gniazdo, świat, mapa | **brak** — etapy E2–E5 planu serwera gry |
 | Konta i logowanie | **brak** — tylko goście |
-| Testy backendu (domena + warstwa aplikacji) | **30 testów, wszystkie zielone** |
-| Testy integracyjne API | **puste rusztowanie** |
+| Testy domeny i warstwy aplikacji | **47 testów, wszystkie zielone** |
+| Testy ścieżki meczu w warstwie API | **16 testów, wszystkie zielone** |
+| Testy serwera gry | **21 testów, wszystkie zielone** |
 | Testy frontendu | **brak** (nietknięty szablon, patrz §8.3) |
 
 ---
@@ -51,7 +64,8 @@ domyślnie stoi, bo nie ma komu oddać meczu (patrz §5.8).
 | Klient | Angular 22 (zoneless, sygnały), TailwindCSS 4, DaisyUI 5, `@microsoft/signalr` 10 |
 | Meta-serwer | .NET 10, ASP.NET Core (kontrolery + SignalR), EF Core 10 |
 | Baza | **SQLite** (docelowo PostgreSQL) |
-| Testy | xUnit, Shouldly, NSubstitute, `FakeTimeProvider` |
+| Serwer gry | C++23, Boost.Asio/Beast, Protocol Buffers; CMake + vcpkg (manifest) |
+| Testy | xUnit, Shouldly, NSubstitute, `FakeTimeProvider`; GoogleTest po stronie C++ |
 
 ```
 territorial-game/
@@ -69,8 +83,18 @@ territorial-game/
 │   │   ├── Territorial.Meta.Infrastructure/  EF Core, repozytoria, katalog map
 │   │   └── Territorial.Meta.Api/             kontrolery, hub, auth, zegar, kompozycja
 │   └── tests/
+├── gameserver/                   serwer pojedynczego meczu (C++23, CMake + vcpkg)
+│   ├── src/app/                  opcje wiersza poleceń, logowanie
+│   ├── src/tick/                 zegar meczu (korutyna): 10 Hz sim / 5 Hz wysyłka
+│   └── tests/                    GoogleTest
+├── proto/                        game.proto — wspólny kontrakt meczu (D2)
 └── docs/
 ```
+
+**Dlaczego `proto/` leży osobno:** schemat należy do serwera gry i do klienta naraz, a trzymany
+w katalogu jednej ze stron stałby się jej własnością. Kod generowany nie wchodzi do repozytorium —
+po stronie C++ tworzy go CMake, po stronie klienta `npm run proto:gen` (uruchamiane automatycznie
+przed `start`, `build` i `test`).
 
 **Kierunek zależności:** `Api → Application → Domain`, `Api → Infrastructure → Application`.
 Domena nie zna EF Core ani ASP.NET; `Lobby` i `Player` to zwykłe klasy przyjmujące czas
@@ -106,7 +130,17 @@ Management), razem z dwoma wymuszonymi podniesieniami zależności przechodnich 
    serwer → Clients.All.LobbyHeader                       wszyscy połączeni
    serwer → Group('lobby-members').LobbyRoster            wyłącznie członkowie
 
-⑤ Wyjście
+⑤ Start meczu (licznik dobił do zera, roster niepusty)
+   serwer → Clients.All.LobbyHeader   state="Starting"    roster zamrożony
+   launcher: sloty → zapis meczu → alokacja → bilety
+   serwer → User(playerId).MatchReady                     imiennie, nigdy broadcastem
+   serwer → Clients.All.LobbyHeader                       już nowe lobby
+
+⑥ Wejście do meczu
+   klient:  zapis biletu w pamięci, nawigacja na /match/{matchId}
+   guard:   po odświeżeniu strony dobiera bilet przez POST /api/matches/{id}/ticket
+
+⑦ Wyjście
    klient → invoke Leave()  →  usunięcie z rostera i z grupy
 ```
 
@@ -348,19 +382,111 @@ zawsze.
 w bazie, wie dopiero hub. Mieszka w tym samym enumie, bo to jeden kontrakt odpowiedzi dla klienta,
 a nie sygnatura jednej metody.
 
-**Czego brakuje na końcu tego cyklu — i jak to jest zaznaczone.** Gdy lobby dobija do terminu
-startu, `LobbyClock` loguje ostrzeżenie, że alokacja meczu nie jest zaimplementowana, i woła
-`CloseAndReopen`. To jest dokładne miejsce, w które wejdzie wywołanie orkiestratora i rozesłanie
-biletów (§5③ dokumentu architektury). Roster nowego lobby jest pusty; połączenia zostają, ale
-członkostwo nie jest dziedziczone — klient zauważa zmianę `lobbyId` i dołącza ponownie, jeśli
-gracz nadal siedzi na widoku lobby.
+**Co dzieje się na końcu tego cyklu.** Gdy lobby dobija do terminu, zegar rozgłasza nagłówek ze
+stanem `Starting` i oddaje zamrożony roster launcherowi — dalszy ciąg opisuje §4.9. Lobby domyka
+**launcher**, nie zegar: zamrożona lista musi dożyć do chwili, w której ktoś zrobi z niej mecz.
+Roster nowego lobby jest pusty; połączenia zostają, ale członkostwo nie jest dziedziczone —
+klient zauważa zmianę `lobbyId` i dołącza ponownie, jeśli gracz nadal siedzi na widoku lobby.
 
-**Domyślnie ta ścieżka jest nieosiągalna.** `Lobby.CountdownEnabled` jest `false`, więc lobby
-otwiera się przez `OpenFrozen`: licznik stoi na pełnym oknie, `StartsAt` jest `null`, `Starting`
-nie da się osiągnąć. Pełna cykliczna logika jest zaimplementowana i przetestowana — uruchomienie
-jej to **zmiana jednej wartości w konfiguracji**, bez dotykania kodu.
+**Cykl jest włączony.** `Lobby:CountdownEnabled` ma wartość `true`, więc lobby otwiera się przez
+`Open` z biegnącym licznikiem. Wyłączenie (`false`) nadal działa i zatrzymuje odliczanie na pełnym
+oknie — `Starting` staje się wtedy nieosiągalne, co bywa wygodne przy pracy nad czymś innym.
 
-### 4.9 Nawigacja i spójność stanu w UI
+### 4.9 Start meczu: alokacja, bilety, nowe lobby
+
+Etap 1 planu z [plan-alokacji-meczu.md](plan-alokacji-meczu.md): wszystko między „lobby dobiło do
+terminu" a „gracz ma w ręku adres i bilet". Game-serwera nadal nie ma — ścieżka kończy się
+na bilecie.
+
+```
+① zegar        Lobby.Advance → Starting        roster ZAMROŻONY, Join odbija się o NotGathering
+               rozgłasza nagłówek state="Starting"
+               wpisuje roster do MatchStartChannel i wraca do tykania
+
+② launcher     Match.Create: sloty 1..N ludziom w kolejności rostera, N+1..MaxActors botom
+               zapis Match + MatchParticipant                     ← PRZED rozmową z alokatorem
+               IMatchAllocator.AllocateAsync                      ← 3 próby, atrapa w etapie 1
+               Match.MarkLive(endpoint)
+
+③ bilety       Clients.User(playerId).MatchReady { matchId, wsUrl, ticket, expiresAt }
+               jeden na gracza, nigdy broadcastem
+
+④ domknięcie   CurrentLobby.CloseAndReopen() — ZAWSZE, także po nieudanej alokacji
+
+⑤ klient       MatchGateway zapamiętuje bilet W PAMIĘCI, nawigacja na /match/{matchId}
+               guard trasy: brak biletu → POST /api/matches/{id}/ticket → nadal brak → strona główna
+```
+
+**Alokacja jest poza taktem zegara.** To najważniejsza decyzja tej ścieżki: alokacja to I/O
+z ponowieniami, a każde `await` w tiku zatrzymuje rozgłaszanie stanu **dla całego serwisu**.
+Dodatkowo zegar łapie każdy wyjątek i tylko go loguje — nieudany start zniknąłby bez śladu
+w stanie. Zegar wpisuje więc żądanie do kanału (`MatchStartChannel`, `Channel` bez limitu, jeden
+producent) i wraca; resztą zajmuje się `MatchLauncher : BackgroundService`.
+
+**Kolejność w tiku ma znaczenie**: nagłówek `Starting` wychodzi **przed** wpisem do kanału. Przy
+szybkiej alokacji launcher zdążyłby inaczej rozgłosić nowe lobby jako pierwszy, a gracze
+zobaczyliby start poprzedniego już po otwarciu następnego. Wpis do kanału jest za to poza blokiem
+`try` rozgłaszania — nieudana wysyłka nie może zjeść startu, bo lobby jest już zamrożone i tylko
+launcher potrafi je z tego stanu wyprowadzić.
+
+**Bilet nie idzie broadcastem.** `Clients.User(...)` wymaga własnego `IUserIdProvider`: domyślny
+czyta `ClaimTypes.NameIdentifier`, a tożsamość gracza siedzi w claimie `sub` (`MapInboundClaims`
+jest wyłączone). Bez `PlayerUserIdProvider` wysyłka zwracałaby `null` jako identyfikator
+i **po cichu nie robiła nic** — najgorszy rodzaj awarii.
+
+**Bilet nie jest jeszcze podpisany.** Nie ma go kto weryfikować, więc kryptografia dawałaby
+złudzenie ochrony. Wartość jest nieprzezroczystym ciągiem o docelowym ładunku
+(`playerId, matchId, slot, nonce`) i docelowym TTL 60 s; etap 2 podmienia sposób zamknięcia
+ładunku, nie kontrakt wiadomości ani kod klienta.
+
+**Sloty (D12).** `0` to pustkowie, `255` woda, `1..254` aktorzy. Ludzie dostają `1..N`
+w kolejności rostera — a ta jest stabilna (`JoinedAt`, potem `PlayerId`), więc przypisanie da się
+odtworzyć, czego wymaga determinizm z D10. Boty zajmują `N+1..MaxActors` i nie mają wiersza
+w bazie: wynikają z liczby ludzi i sufitu mapy, więc nie ma czego synchronizować. Slot jest
+**zapisany** na uczestniku, a nie wyliczany ponownie — reguła może się zmienić, a stare mecze mają
+zostać czytelne.
+
+**Ziarno** generuje meta z CSPRNG i zapisuje na meczu. Bez zapisanego ziarna replay z D10 nie
+istnieje, a przewidywalne ziarno byłoby przewagą w rozgrywce (zachowanie botów).
+
+**Macierz awarii**
+
+| Awaria | Zachowanie |
+|---|---|
+| Alokator milczy albo brak pojemności | 3 próby, potem `Match.State = Failed`, `MatchStartFailed` do członków lobby, nowe lobby |
+| Alokacja udana, bilet niedostarczony do części graczy | pętla leci dalej — slot zostaje zajęty, gracz dobierze bilet ponownie (etap 2) |
+| Zapis nieudanego startu też się nie udał | ślad w logu; gracze i tak dostają komunikat |
+| Rozgłoszenie nowego lobby nie wyszło | lobby jest już otwarte; klienci zobaczą je przy najbliższej zmianie stanu |
+| Restart meta w trakcie alokacji | mecz zostaje w `Allocating` — zamiatanie takich wierszy jeszcze nie istnieje (§9) |
+
+**Ponowne wydanie biletu** (`POST /api/matches/{matchId}/ticket`, §5.1) nie jest dodatkiem, tylko
+częścią tej samej ścieżki. Bilet żyje minutę, więc gracz z kartą w tle zdąży przegapić
+`MatchReady`; dostarczenie do części graczy mogło się nie udać, a proces trzyma ich sloty; i wreszcie
+jest to **dokładnie ten sam kod**, którego wymaga powrót do trwającego meczu po zerwaniu połączenia
+(D14). Adres brany jest z zapisanego `Match.WsUrl`, a nie składany na nowo z konfiguracji — regułę
+adresu zna alokator i to on ją stosuje, więc drugie miejsce składające adres rozjechałoby się z tym,
+co gracz dostał w `MatchReady`.
+
+**Mecze porzucone w trakcie alokacji** zamiata `StaleMatchSweeper` przy starcie procesu: wiersz
+w stanie `Allocating` po restarcie nie ma już swojego launchera, więc nikt by go nie domknął.
+Bezpieczne wyłącznie przy jednej instancji — druga wymagałaby progu wieku albo dzierżawy, inaczej
+oznaczałaby jako nieudane mecze zakładane właśnie przez sąsiada.
+
+**Klient.** Bilet trzymany jest **wyłącznie w pamięci** (`MatchGateway`) — sześćdziesięciosekundowe
+poświadczenie nie ma po co trafiać do `localStorage`, a pamięć umiera razem z kartą, co jest tu
+zaletą. Obsługa `MatchReady` gasi `membershipWanted` **przed** czymkolwiek innym: nagłówek nowego
+lobby może przyjść w tej samej sekundzie, a gracz wpuszczony do meczu nie może wrócić do kolejki na
+następny. Potem nawiguje na `/match/{matchId}` — nawigacja wychodzi z serwisu, a nie z widoku lobby,
+bo hub żyje w `App` i zaproszenie musi zadziałać także wtedy, gdy gracz czeka na profilu.
+
+Utrata biletu przy odświeżeniu strony **nie jest awarią**: guard trasy dobiera nowy z serwera
+i dopiero jego odmowa odsyła gracza na stronę główną. W fazie `Starting` nad licznikiem lobby
+pojawia się „allocating server…", żeby zero na zegarze nie wyglądało jak zawieszony serwis.
+
+Sam widok meczu jest zaślepką — pokazuje adres, licznik ważności biletu i przycisk odnowienia.
+Tu wejdzie kanwa, worker i strumień protobuf.
+
+### 4.10 Nawigacja i spójność stanu w UI
 
 Pięć tras, wszystkie ładowane leniwie (`loadComponent`), więc wejście na stronę główną nie ściąga
 profilu, poradnika ani lobby:
@@ -408,7 +534,7 @@ każdym cyklu detekcji — zegar odświeża się cztery razy na sekundę, a grac
 jest wielokolumnowa i **jako jedyna** przewija się w widoku lobby: strona jako całość nigdy nie
 dostaje suwaka.
 
-### 4.10 Warstwa wizualna
+### 4.11 Warstwa wizualna
 
 Motyw DaisyUI `crt` — zielony monochrom na czerni, monospace, zerowe promienie zaokrągleń.
 Efekty w `styles.css`:
@@ -430,7 +556,7 @@ Nakładki są `fixed inset-0`, czyli pokrywają dokładnie widoczny obszar i nie
 opisowe na plakietce i panelu gracza. `btn-outline` wymaga modyfikatora koloru — bez niego
 w tym motywie wychodzi z alfą 0.2 i nie przechodzi kontrastu AA.
 
-### 4.11 Bezpieczeństwo
+### 4.12 Bezpieczeństwo
 
 | Mechanizm | Realizacja |
 |---|---|
@@ -453,9 +579,9 @@ otwierać tej furtki REST-owi, gdzie lądowałby w logach dostępowych proxy.
 przemapowane na długi URI `ClaimTypes.NameIdentifier` i `GetPlayerId` nie znajduje claima, który
 serwis sam przed chwilą wystawił.
 
-### 4.12 Persystencja
+### 4.13 Persystencja
 
-Jedna encja i jedna tabela. Migracja `20260728210541_InitialCreate`.
+Trzy tabele. Migracje: `20260728210541_InitialCreate`, `20260730141334_AddMatches`.
 
 ```
 players
@@ -466,7 +592,32 @@ players
   color_hue         INTEGER
   color_saturation  INTEGER
   color_value       INTEGER
+
+matches
+  id                TEXT  PK   (GUID v7)
+  map_id            TEXT
+  mode              TEXT       enum jako tekst
+  max_actors        INTEGER    sufit aktorów: ludzie + boty
+  seed              INTEGER    ziarno symulacji z CSPRNG
+  endpoint          TEXT?      host:port procesu; null do zakończenia alokacji
+  ws_url            TEXT?      adres publiczny dla klienta; null jak wyżej
+  state             TEXT       Allocating | Live | Completed | Failed  (indeks)
+  created_at, started_at?, ended_at?  TEXT
+
+match_participants
+  (match_id, player_id)  PK, FK → matches ON DELETE CASCADE
+  slot              INTEGER    1..254; unikalny w obrębie meczu
+  nickname          TEXT       KOPIA z chwili startu
+  color_*           INTEGER    kopia jak wyżej
 ```
+
+**Lobby nie ma tabeli, mecz ma.** Lobby jest jedno, żyje kilkadziesiąt sekund i zmienia się przy
+każdym dołączeniu — zapis oznaczałby INSERT na join i odczyt z powrotem przez zegar. Mecz jest
+pierwszą rzeczą, która **musi** przetrwać restart: bez niego meta nie odpowie „czy gracz X jest
+uczestnikiem meczu Y na slocie S", więc nie wyda ponownie biletu ani nie przyjmie wyniku.
+
+**Nick i kolor uczestnika to kopia**, nie referencja: game-serwer potrzebuje ich do `SlotInfo`
+w `MatchInit`, a historia meczów powinna pokazywać nick używany wtedy, nie dzisiejszy.
 
 Dwa rozwiązania warte odnotowania:
 
@@ -477,7 +628,7 @@ Dwa rozwiązania warte odnotowania:
   odczytu. Gdyby reguły nicka kiedyś się zaostrzyły, `Create` wysadzałby **czytanie** istniejących
   wierszy.
 
-### 4.13 Diagnostyka
+### 4.14 Diagnostyka
 
 | Endpoint | Dostępność |
 |---|---|
@@ -536,6 +687,30 @@ Nagłówek aktualnego lobby (`LobbyHeaderDto`). Aktualizacje na żywo idą hubem
 na pierwszy paint i na wypadek środowiska bez WebSocketów. **Rostera tu nie ma** — należy się
 wyłącznie graczom, którzy dołączyli.
 
+#### `POST /api/matches/{matchId}/ticket` — wymaga tokenu
+
+Wydaje wołającemu świeży bilet do meczu, w którym gra. Ciało żądania puste.
+
+```json
+{
+  "ticket": "eyJ…",
+  "wsUrl": "wss://localhost:5001/match/019fb3…",
+  "expiresAt": "2026-07-30T14:21:03.000Z"
+}
+```
+
+| Kod | Kiedy |
+|---|---|
+| 200 | wołający jest uczestnikiem, a mecz jest w stanie `Live` |
+| 401 | brak albo nieprawidłowy token |
+| 404 | **wszystko inne** — mecz nie istnieje, nie żyje albo wołający w nim nie gra |
+
+Jedno 404 na trzy różne sytuacje jest celowe: rozróżnienie „nie ma takiego meczu" od „nie grasz
+w nim" zamieniłoby endpoint w sposób sprawdzania, kto gra w meczu o zgadniętym identyfikatorze,
+dostępny dla każdego z tokenem gościa.
+
+`wsUrl` czytany jest **z meczu**, a nie składany na nowo z konfiguracji — patrz §4.9.
+
 #### `GET /api/health`
 
 Standardowy health check ASP.NET Core.
@@ -558,9 +733,14 @@ nie ciszą po stronie klienta)
 |---|---|---|
 | `LobbyHeader(header)` | wszyscy połączeni | `LobbyHeaderDto` |
 | `LobbyRoster(roster)` | grupa `lobby-members` | `LobbyRosterDto` |
+| `MatchReady(match)` | **wyłącznie jeden gracz** | `MatchReadyDto` |
+| `MatchStartFailed(failure)` | grupa `lobby-members` | `MatchStartFailedDto` |
 
 Samo podłączenie **nie** oznacza członkostwa: strona główna łączy się tylko po to, żeby widzieć
 nagłówek na żywo.
+
+`MatchReady` adresowane jest po graczu (`Clients.User`), bo bilet jest poświadczeniem na konkretny
+slot. Działa to dzięki `PlayerUserIdProvider` czytającemu claim `sub` — patrz §4.9.
 
 ### 5.3 Kontrakty
 
@@ -582,7 +762,14 @@ LobbyRosterDto        { lobbyId: Guid, players: LobbyPlayerDto[] }
 LobbyPlayerDto        { playerId: Guid, nickname: string, color: HsvColorDto }
 PlayerProfileDto      { id: Guid, nickname: string, color: HsvColorDto }
 HsvColorDto           { hue: 0..359, saturation: 0..100, value: 0..100 }
+
+MatchReadyDto         { matchId: Guid, wsUrl: string, ticket: string, expiresAt: DateTimeOffset }
+MatchStartFailedDto   { reason: string }
 ```
+
+`MatchReadyDto` jest celowo minimalne: mapa, tick rate i lista slotów przyjdą w `MatchInit` od
+game-serwera, żeby nie mieć dwóch źródeł prawdy o tym samym meczu. `MatchStartFailedDto` nie niesie
+żadnego szczegółu awarii — adresy wewnętrzne i treści wyjątków zostają w logach.
 
 `state` i `mode` są **tekstem**, a nie liczbą: kontrakt sieciowy pozostaje czytelny, dopisanie
 wartości do enuma niczego nie przesuwa, a domena nie musi znać atrybutów serializacji.
@@ -611,6 +798,17 @@ GameMode              Ffa
 LobbyState            Gathering | Starting | Closed
 LobbyTick             Idle | WindowReset | Started
 JoinResult            Joined | AlreadyJoined | Full | NotGathering
+
+Match                 encja trwała
+  Id, MapId, Mode, MaxActors, Seed, Endpoint?, WsUrl?, State,
+  CreatedAt, StartedAt?, EndedAt?
+  HumanCount, BotCount, IsLive, Participants
+  Create(map, mode, seed, roster, now) · MarkLive(endpoint, wsUrl, now) · MarkFailed(now)
+  ParticipantOf(playerId) → MatchParticipant?
+
+MatchParticipant      encja trwała: MatchId, PlayerId, Slot, Nickname, Color
+MatchState            Allocating | Live | Completed | Failed
+ActorSlot             stałe D12: Wilderness=0, FirstActor=1, LastActor=254, Water=255
 ```
 
 `Roster()` zwraca listę w **stabilnej kolejności** — od najdawniej obecnego, z identyfikatorem jako
@@ -622,7 +820,7 @@ słownika nie jest gwarantowana.
 
 ## 6. Testy
 
-### 6.1 Backend — 30 testów, wszystkie zielone
+### 6.1 Domena i warstwa aplikacji — 47 testów, wszystkie zielone
 
 ```bash
 dotnet test meta/Territorial.Meta.slnx
@@ -651,12 +849,45 @@ dotnet test meta/Territorial.Meta.slnx
 - rozłączenie jednej z dwóch kart **nie** rozpoczyna karencji
 - `Leave` usuwa natychmiast, bez czekania na karencję
 - `RefreshPlayer`: nowy nick widoczny dla wszystkich; cisza dla kogoś spoza lobby
+- start: tik oddaje zamrożony roster, a lobby **zostaje** w `Starting`, dopóki ktoś go nie zużyje
+- puste lobby restartuje okno zamiast startować; `CloseAndReopen` otwiera puste lobby z nowym `Id`
 
-### 6.2 Testy integracyjne API — rusztowanie
+**`MatchTests`** — przypisanie slotów i przejścia stanu meczu:
 
-Projekt istnieje i jest podłączony (`InternalsVisibleTo` dla `WebApplicationFactory<Program>`),
-ale zawiera wyłącznie pusty `UnitTest1`. **Brak pokrycia** dla: uwierzytelniania, ścieżek
-kontrolerów, huba end-to-end i persystencji.
+- ludzie dostają kolejne sloty w kolejności rostera, zaczynając od `1` (a nie od zarezerwowanego `0`)
+- nick i kolor są kopiowane, więc późniejsza zmiana profilu nie przepisuje historii
+- boty dopełniają mapę do `MaxActors`
+- odrzucenie pustego rostera, rostera większego od mapy i mapy szerszej niż przestrzeń slotów
+- `MarkLive` zapisuje oba adresy i chwilę startu, drugie wywołanie rzuca
+- `MarkFailed` jest ciche dla meczu, który już żyje — wołane bywa ze ścieżki obsługi awarii
+- `ParticipantOf` znajduje slot uczestnika i nic nie zwraca dla kogoś z zewnątrz
+
+### 6.2 Ścieżka meczu w warstwie API — 16 testów, wszystkie zielone
+
+`MatchLauncherTests` składa prawdziwy launcher, prawdziwe lobby, broadcaster i wystawianie biletów;
+podstawione są wyłącznie porty na zewnątrz (orkiestrator, baza, transport SignalR). Launcher
+wołany jest wprost, bez wątku w tle — test hostowanego serwisu musiałby na coś czekać i migotałby
+z powodów niezwiązanych z testowaną logiką.
+
+- bilet trafia do każdego człowieka i **wyłącznie** do niego (`Clients.User`, bez broadcastu)
+- mecz jest zapisany, zanim ruszy rozmowa z alokatorem
+- adres z alokacji ląduje na meczu, uczestnik dostaje slot `1`
+- po starcie otwiera się nowe, puste lobby
+- alokacja jest ponawiana przed poddaniem się
+- trwała awaria alokacji: `MatchStartFailed` do czekających, mecz w stanie `Failed`, nowe lobby
+  mimo wszystko otwarte
+
+`MatchesControllerTests` — ponowne wydanie biletu: uczestnik dostaje świeży bilet i **ten sam**
+adres co w `MatchReady`; nieuczestnik, mecz w trakcie alokacji i mecz nieistniejący dają
+identyczne 404; żądanie bez tożsamości kończy się 401 i nie dotyka bazy.
+
+`StaleMatchSweeperTests` — mecze zostawione w `Allocating` są zamykane, brak takich nie generuje
+zapisu, a padnięta baza nie przewraca startu serwisu (samo zamiatanie wyjątek przepuszcza, połyka
+go dopiero hostowany serwis).
+
+Nadal **brak pokrycia** dla uwierzytelniania na poziomie pipeline'u, huba end-to-end i persystencji —
+`WebApplicationFactory<Program>` jest podłączona (`InternalsVisibleTo`), ale nikt jej jeszcze
+nie używa.
 
 ### 6.3 Frontend — brak pokrycia
 
@@ -679,8 +910,13 @@ usunięcia.
 | `Jwt:Issuer` / `Jwt:Audience` | `territorial-meta` / `territorial-client` | |
 | `Jwt:Lifetime` | 30 dni | |
 | `Lobby:GatheringSeconds` | `60` | długość okna zbierania |
-| `Lobby:CountdownEnabled` | `false` | **przełącznik uruchamiający cykl lobby** |
+| `Lobby:CountdownEnabled` | `true` | przełącznik cyklu lobby; `false` zatrzymuje licznik |
 | `Lobby:DisconnectGraceSeconds` | `5` | karencja po utracie ostatniego połączenia |
+| `Match:AllocationAttempts` | `3` | ile prób rozmowy z alokatorem, zanim start uznamy za nieudany |
+| `Match:AllocationRetryDelayMilliseconds` | `250` | odstęp między próbami |
+| `Match:TicketLifetimeSeconds` | `60` | ważność biletu meczowego |
+| `Match:MatchWebSocketBaseUrl` | `wss://localhost:5001/match` | prefiks adresu meczu; pełny to `{prefiks}/{matchId}` |
+| `Match:FakeAllocatorEndpoint` | `127.0.0.1:5101` | adres oddawany przez atrapę alokatora |
 
 Profil `https` nasłuchuje na `https://localhost:5001`.
 
@@ -735,6 +971,85 @@ Certyfikat deweloperski dla `ng serve --ssl` trzeba wyeksportować do `client/ss
 i `localhost.key` — samo `dotnet dev-certs https --trust` nie wystarczy, bo Angular czyta pliki
 z dysku.
 
+### 8.1 Serwer gry
+
+Osobny cykl budowania i **na tym etapie niepotrzebny do uruchomienia aplikacji** — proces nie ma
+jeszcze gniazda, więc nic do niego nie wchodzi. Wymaga `VCPKG_ROOT` wskazującego instalację vcpkg;
+wszystkie polecenia z katalogu `gameserver/`.
+
+```bash
+cmake --preset windows-msvc
+```
+
+```bash
+cmake --build --preset windows-msvc
+```
+
+```bash
+ctest --preset windows-msvc
+```
+
+Pierwsza konfiguracja zaciąga Boost, protobuf i GoogleTest — z pustym cache'em vcpkg to
+kilkadziesiąt minut kompilacji, z zapełnionym kilkadziesiąt sekund. Kolejne budowy dotyczą już
+tylko naszego kodu.
+
+| Preset | Kiedy |
+|---|---|
+| `windows-msvc` | terminal i CI — generator Visual Studio znajduje kompilator sam |
+| `windows-ninja` | Developer PowerShell, Debug — szybsza budowa przyrostowa |
+| `windows-ninja-release` | to samo z optymalizacją, do mierzenia czasu |
+| `linux-clang` | platforma docelowa (decyzja 6.5 planu serwera gry) |
+
+Dwa generatory nie są niekonsekwencją: Ninja wymaga kompilatora na ścieżce, czyli środowiska
+`vcvars`, a generator Visual Studio znajduje go sam i dzięki temu `cmake --preset` działa
+z każdego terminala. **CLion nie używa żadnego z tych presetów** — patrz §8.2.
+
+Test dymny — proces przechodzi 50 tików symulacji (5 sekund) i kończy się sam:
+
+```bash
+./build/windows-msvc/RelWithDebInfo/gameserver.exe --match-id 018f3a2b-5c7d-7e91-9a2b-3c4d5e6f7a8b --port 5101 --max-ticks 50
+```
+
+### 8.2 Serwer gry w CLion
+
+Projektem CMake jest katalog `gameserver/` i to jego otwiera się w CLion.
+
+**W CLion pracuje się na jego własnym profilu, nie na presecie** — profile z presetów należy
+wyłączyć. Powód jest konkretny: dla profilu z presetu CLion podaje pełną ścieżkę do `cl.exe`, ale
+**nie wczytuje środowiska Visual Studio**, więc kompilacja przechodzi, a linkowanie kończy się na
+`LNK1104: nie można otworzyć pliku "kernel32.lib"` — brakuje `LIB` ze ścieżkami do bibliotek SDK.
+Przy własnym profilu CLion to środowisko ustawia i wszystko działa.
+
+1. **Settings → Build, Execution, Deployment → CMake**: zostaw profil `Debug`, wyłącz profile
+   pochodzące z presetów.
+2. Łańcuch narzędzi: **Visual Studio**, architektura **amd64**. Generator: **Ninja** (CLion nie
+   obsługuje generatora Visual Studio).
+3. Nic więcej nie trzeba ustawiać: łańcuch narzędzi vcpkg podstawia `CMakeLists.txt` samodzielnie
+   z `VCPKG_ROOT`, a wszystkie flagi — standard, ostrzeżenia jako błędy, `/fp:strict` — i tak są
+   w `CMakeLists.txt`, nie w presecie. Profil CLion-a i preset dają więc ten sam wynik.
+4. Konfiguracja uruchomienia „gameserver (dymny, 50 tików)" jest wersjonowana w `gameserver/.run/`
+   i pojawia się od razu.
+
+`VCPKG_ROOT` musi być widoczne dla CLion-a — jeśli zmienna została ustawiona po jego uruchomieniu,
+trzeba go zrestartować. Gdy jej nie ma, konfiguracja kończy się komunikatem mówiącym wprost, czego
+brakuje. Budowa kompilatorem innym niż MSVC też zatrzymuje konfigurację komunikatem
+z `CMakeLists.txt` — cicha budowa MinGW obok reszty projektu byłaby gorsza niż błąd.
+
+Po każdej nieudanej próbie: **Reset Cache and Reload Project**. Zepsuty cache zostaje w katalogu
+budowania i samo przeładowanie go nie naprawi.
+
+> **Jeśli mimo wszystko chcesz w CLion profil z presetu** — uruchom CLion z Developer PowerShella.
+> Wtedy dziedziczy gotowe środowisko Visual Studio i preset `windows-ninja` konfiguruje się
+> poprawnie. Zysk jest jednak żaden: preset wnosi tylko generator, typ budowy i łańcuch narzędzi
+> vcpkg, a te CLion i tak ustawia sam.
+
+> **Jedno tarcie:** `proto/game.proto` leży poza projektem CMake (bo należy też do klienta), więc
+> w drzewie CLion-a go nie widać. Do edycji: **File → Attach Directory to Project** na katalogu
+> `proto/`, albo otwarcie całego repozytorium i „Load CMake Project" na `gameserver/CMakeLists.txt`.
+
+Preset `linux-clang` buduje to samo Ninją i klangiem; jest utrzymywany od pierwszego dnia, bo
+produkcja stoi na Linuksie (plan serwera gry, decyzja 6.5).
+
 ---
 
 ## 9. Czego jeszcze nie ma
@@ -743,16 +1058,22 @@ Uporządkowane od najbliższego do najdalszego.
 
 | # | Brak | Uwagi |
 |---|---|---|
-| 1 | **Serwer gry** | cały mecz: symulacja, mapa, ekspansja, ekonomia. Dokument architektury, §4.3 |
-| 2 | **Alokacja meczu i bilety** | miejsce oznaczone logiem w `LobbyClock`; §5③ |
-| 3 | Włączenie odliczania | `Lobby:CountdownEnabled` — logika gotowa i przetestowana |
-| 4 | Katalog map | jedna pozycja na sztywno (`moon`, 100 aktorów); docelowo tabela z §4.2 |
-| 5 | Konta i logowanie | dziś wyłącznie goście; `Player` jest przygotowany na dowiązanie konta |
-| 6 | PostgreSQL | dziś SQLite; wymiana dotyczy jednej linii w `AddInfrastructure` i migracji |
-| 7 | Testy integracyjne API | rusztowanie bez testów |
-| 8 | Testy frontendu | patrz §6.3 |
-| 9 | Widoki `guide` i `contact` | zaślepki |
-| 10 | Generowanie klientów HTTP z OpenAPI | typy TS pisane ręcznie |
-| 11 | Skalowanie poziome | stan lobby w pamięci jednej instancji; wymaga backplane i lidera zegara |
+| 1 | **Serwer gry** | szkielet (E1) stoi; brakuje gniazda, świata i mapy — etapy E2–E5 z [plan-serwera-gry.md](plan-serwera-gry.md). Sama symulacja to osobny plan |
+| 2 | **Podpis biletu** | dziś nieprzezroczysty ciąg; krzywa wybrana (ECDSA P-256), zostaje implementacja |
+| 3 | **Prawdziwa alokacja** | `LocalProcessMatchAllocator`, potem agent na maszynie; dziś atrapa |
+| 4 | Odbiór wyniku meczu | `Internal/` na mTLS, idempotentny zapis po `matchId`; stan `Completed` czeka gotowy |
+| 5 | Katalog map | jedna pozycja na sztywno (`moon`, 100 aktorów); docelowo tabela z §4.2 |
+| 6 | Konta i logowanie | dziś wyłącznie goście; `Player` jest przygotowany na dowiązanie konta |
+| 7 | PostgreSQL | dziś SQLite; wymiana dotyczy jednej linii w `AddInfrastructure` i migracji |
+| 8 | Testy API end-to-end | `WebApplicationFactory` podłączona, ale nieużywana; patrz §6.2 |
+| 9 | Testy frontendu | patrz §6.3 |
+| 10 | Widoki `guide` i `contact` | zaślepki |
+| 11 | Generowanie klientów HTTP z OpenAPI | typy TS pisane ręcznie |
+| 12 | Skalowanie poziome | stan lobby w pamięci jednej instancji; wymaga backplane, lidera zegara i innego zamiatania meczów |
 
-Plan wprowadzenia punktów 1–3 opisuje [plan-alokacji-meczu.md](plan-alokacji-meczu.md).
+Plan wprowadzenia punktów 1–4 opisuje [plan-alokacji-meczu.md](plan-alokacji-meczu.md); etap 1
+i większość etapu 2 są już zrobione (§4.9) — zostaje sam podpis biletu.
+
+Punkt 1 ma własny dokument: [plan-serwera-gry.md](plan-serwera-gry.md) opisuje szkielet — proces
+w C++, protokół, weryfikację biletu i mapę na ekranie gracza, **bez symulacji**. Podpis biletu
+(punkt 2) wchodzi razem z nim, bo dopiero game-serwer ma go czym weryfikować.

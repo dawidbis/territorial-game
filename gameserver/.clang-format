@@ -1,0 +1,21 @@
+# Styl serwera gry. Osobny plik zamiast wpisów w .editorconfig, bo formatowanie C++
+# robi clang-format, a .editorconfig zna tylko wcięcia.
+#
+# Baza „Microsoft" dobrana pod resztę repozytorium: klamra w nowej linii, cztery spacje,
+# przecinek na początku listy inicjalizacyjnej — czyli to samo, co widać po stronie C#.
+BasedOnStyle: Microsoft
+ColumnLimit: 100
+IndentWidth: 4
+AccessModifierOffset: -4
+NamespaceIndentation: None
+PointerAlignment: Left
+ReferenceAlignment: Left
+AllowShortFunctionsOnASingleLine: Empty
+AlwaysBreakTemplateDeclarations: Yes
+BreakConstructorInitializers: BeforeComma
+FixNamespaceComments: true
+SortIncludes: CaseSensitive
+
+# Grupy nagłówków zachowane tak, jak je napisano: własne, potem obce, potem standardowe.
+# Automatyczne sortowanie w jeden blok mieszałoby zależności projektu z bibliotekami.
+IncludeBlocks: Preserve

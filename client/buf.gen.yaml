@@ -1,0 +1,14 @@
+# Generowanie kodu TypeScript ze wspólnego schematu (D2).
+#
+# Wejściem jest katalog `proto/` z korzenia repozytorium — ten sam plik, z którego
+# generuje się strona C++. Wynik ląduje w `src/proto/` i jest w .gitignore: kod
+# generowany trzymany w repozytorium prędzej czy później rozjedzie się ze schematem,
+# a diff wygenerowanego pliku jest nieczytelny, więc nikt tego nie zauważy.
+version: v2
+inputs:
+  - directory: ../proto
+plugins:
+  - local: protoc-gen-es
+    out: src/proto
+    opt:
+      - target=ts

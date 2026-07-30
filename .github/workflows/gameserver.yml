@@ -1,0 +1,85 @@
+# Budowa i testy serwera gry na obu platformach (decyzja 6.5) oraz sprawdzenie, że
+# wspólny schemat protobuf generuje się także dla klienta.
+#
+# Pipeline wchodzi razem z etapem E1 (decyzja 6.7), zanim pojawi się test determinizmu
+# z §8 dokumentu architektury — bo to on jest prawdziwym powodem, żeby CI istniało,
+# a dopisanie budowy C++ z vcpkg do gotowego pipeline'u po roku jest osobną robotą.
+#
+# Repozytorium nie ma jeszcze zdalnego origin, więc workflow czeka na pierwszy push.
+name: gameserver
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: ${{ matrix.preset }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            preset: windows-msvc
+            cache-path: ~\AppData\Local\vcpkg\archives
+          - os: ubuntu-latest
+            preset: linux-clang
+            cache-path: ~/.cache/vcpkg/archives
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ninja
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      # Runnery mają vcpkg wgrane; wskazujemy je zamiast klonować drugą kopię.
+      - name: Wskaż vcpkg
+        shell: bash
+        run: echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
+
+      # Bez tego każda budowa kompiluje Boost i protobuf od zera — kilkadziesiąt minut.
+      - name: Cache pakietów vcpkg
+        uses: actions/cache@v4
+        with:
+          path: ${{ matrix.cache-path }}
+          key: vcpkg-${{ matrix.os }}-${{ hashFiles('gameserver/vcpkg.json') }}
+          restore-keys: vcpkg-${{ matrix.os }}-
+
+      - name: Konfiguracja
+        working-directory: gameserver
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Budowa
+        working-directory: gameserver
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Testy
+        working-directory: gameserver
+        run: ctest --preset ${{ matrix.preset }}
+
+  proto:
+    name: codegen klienta
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Zależności
+        working-directory: client
+        run: npm ci
+
+      # Schemat jest wspólny (D2), więc zepsuty musi zatrzymać budowę obu stron, a nie
+      # tylko tej, którą akurat ktoś zbudował lokalnie.
+      - name: Generowanie kodu z proto
+        working-directory: client
+        run: npm run proto:gen

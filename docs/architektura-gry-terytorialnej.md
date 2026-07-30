@@ -433,7 +433,7 @@ Meta/
 │   ├── Match, MatchParticipant
 │   └── MapDefinition, Replay
 ├── Services/
-│   ├── TicketService           podpisywanie biletów meczowych (Ed25519)
+│   ├── TicketService           podpisywanie biletów meczowych (ECDSA P-256, §5③)
 │   ├── AllocationService       rozmowa z agentem/orkiestratorem
 │   └── MatchResultService      idempotentny zapis wyników
 └── Infrastructure/
@@ -483,7 +483,7 @@ gameserver/
 │   ├── command_log.cpp      append-only, fsync co 1 s
 │   └── hasher.cpp           xxHash stanu co N ticków
 └── meta/
-    ├── ticket_verifier.cpp  offline weryfikacja Ed25519
+    ├── ticket_verifier.cpp  offline weryfikacja podpisu ECDSA P-256
     └── meta_client.cpp      HTTP do C# na końcu meczu
 ```
 
@@ -499,7 +499,7 @@ Aktor z dużym terytorium ma może kilka tysięcy kafelków granicy — **trzy r
 
 #### Weryfikacja biletu — offline
 
-`ticket_verifier` weryfikuje podpis Ed25519 **kluczem publicznym wbudowanym w obraz / pobranym przy starcie**. Żadnego callbacku HTTP do C# przy każdym połączeniu.
+`ticket_verifier` weryfikuje podpis ECDSA P-256 **kluczem publicznym wbudowanym w obraz / pobranym przy starcie**. Żadnego callbacku HTTP do C# przy każdym połączeniu.
 
 > Game-serwer nie może zależeć od dostępności meta-serwisu w ścieżce krytycznej. Restart ASP.NET nie ma prawa zerwać trwających meczów.
 
@@ -526,9 +526,25 @@ Hub `/hubs/lobby`: `PlayerJoined`, `PlayerLeft`, `PlayerReady`, `SettingsChanged
 Meta otrzymuje `host:port`, generuje **bilet per gracz**:
 
 ```
-JWT Ed25519, TTL 60 s
+JWT ECDSA P-256 (ES256), TTL 60 s
 claims: { playerId, matchId, slot, nonce }
 ```
+
+> **Korekta (30.07.2026).** Wcześniejsza wersja mówiła „Ed25519" — a .NET 10 nie ma Ed25519
+> w BCL: `System.Security.Cryptography` daje `ECDsa` oraz postkwantowe `MLDsa`/`SlhDsa`.
+> Podpis Ed25519 wymagałby natywnej zależności (NSec na libsodium albo BouncyCastle), więc
+> wybrana została **ECDSA P-256**: zero nowych zależności po stronie meta, a po stronie
+> game-serwera OpenSSL, który i tak jest w obrazie. Różnica w rozmiarze podpisu (~70 B DER
+> zamiast 64 B) występuje raz na mecz. Uzasadnienie w
+> [plan-alokacji-meczu.md](plan-alokacji-meczu.md) §6.1.
+>
+> **Dopisek (30.07.2026).** Zdanie o rozmiarze było zbędnie ostrożne: w JWS podpis ES256 to
+> **surowe `R‖S`, 64 bajty** (RFC 7518), a nie DER — dokładnie tyle, co Ed25519. Kodowanie DER
+> pojawiłoby się wyłącznie przy własnym formacie biletu, a bilet jest JWT. Po stronie .NET
+> wychodzi to samo z siebie (`ECDsa.SignData` domyślnie zwraca IEEE P-1363), ale **OpenSSL
+> oczekuje DER**, więc `ticket_verifier` musi złożyć `ECDSA_SIG` z dwóch połówek, zanim
+> zweryfikuje. Prawdziwy koszt tej krzywej to więc dwadzieścia linii w C++, a nie bajty w ruchu —
+> i jest to koszt jednorazowy. Szczegóły w [plan-serwera-gry.md](plan-serwera-gry.md) §3.4.
 
 Rozsyła przez SignalR: `MatchReady { wsUrl, ticket }`
 
@@ -595,7 +611,7 @@ message ClientMsg {
 }
 
 message ClientHello {
-  string ticket = 1;           // JWT Ed25519 z meta-serwera
+  string ticket = 1;           // JWT ECDSA P-256 z meta-serwera
 }
 
 message Command {
