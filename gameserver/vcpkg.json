@@ -6,6 +6,8 @@
   "dependencies": [
     "boost-asio",
     "boost-beast",
+    "boost-json",
+    "openssl",
     "protobuf",
     "gtest"
   ]

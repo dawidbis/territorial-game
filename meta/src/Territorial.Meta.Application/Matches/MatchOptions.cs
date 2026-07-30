@@ -36,6 +36,34 @@ public sealed class MatchOptions
     public string MatchWebSocketBaseUrl { get; init; } = "wss://localhost:5001/match";
 
     /// <summary>
+    /// Klucz prywatny ECDSA P-256 (PEM) do podpisywania biletów.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Nigdy nie trafia do repozytorium — w dev z user-secrets, w produkcji z sekretów hosta.
+    /// Pusty w środowisku deweloperskim oznacza klucz generowany na czas życia procesu;
+    /// poza dev pusta wartość zatrzymuje start, bo bilety podpisane kluczem ginącym przy
+    /// restarcie to awaria, która ujawnia się dopiero po wdrożeniu.
+    /// </para>
+    /// <para>
+    /// Asymetryczny, w odróżnieniu od tokenu gracza (HS256): bilet weryfikuje game-serwer,
+    /// który nie ma i nie ma mieć dostępu do niczego, czym da się podpisywać.
+    /// </para>
+    /// </remarks>
+    public string TicketPrivateKeyPem { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Dokąd zapisać klucz publiczny przy starcie; pusta wartość wyłącza zapis.
+    /// </summary>
+    /// <remarks>
+    /// Game-serwer dostaje ten plik przez <c>--ticket-key</c> i weryfikuje nim bilety offline
+    /// (§4.3). Zapis przy starcie zamiast ręcznego eksportu, bo klucz publiczny nie jest
+    /// sekretem, a ręczny krok rozjeżdża się z kluczem prywatnym dokładnie wtedy, gdy ten
+    /// się zmieni.
+    /// </remarks>
+    public string TicketPublicKeyPath { get; init; } = "App_Data/ticket.pub";
+
+    /// <summary>
     /// Adres wewnętrzny zwracany przez atrapę alokatora.
     /// </summary>
     /// <remarks>

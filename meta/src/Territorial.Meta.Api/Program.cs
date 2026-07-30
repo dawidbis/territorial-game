@@ -45,6 +45,20 @@ var matchOptions =
     builder.Configuration.GetSection(MatchOptions.SectionName).Get<MatchOptions>()
     ?? new MatchOptions();
 
+// Poza dev brak klucza biletów jest błędem konfiguracji, a nie niedogodnością: klucz
+// generowany przy starcie ginie razem z procesem, więc po restarcie bilety w rękach graczy
+// przestają cokolwiek znaczyć — a game-serwer, który dostał wcześniejszy klucz publiczny,
+// odrzuca wszystkie nowe. Awaria ujawniłaby się dopiero na produkcji i wyglądała jak błąd sieci.
+if (
+    !builder.Environment.IsDevelopment()
+    && string.IsNullOrWhiteSpace(matchOptions.TicketPrivateKeyPem)
+)
+{
+    throw new InvalidOperationException(
+        "Brak Match:TicketPrivateKeyPem. Wygeneruj klucz ECDSA P-256 i wstaw go w sekretach hosta."
+    );
+}
+
 #endregion
 
 #region CORS — jawna lista origin-ów, wymuszona przez SignalR
@@ -147,6 +161,10 @@ builder.Services.AddSingleton(lobbyOptions);
 builder.Services.AddSingleton(matchOptions);
 
 builder.Services.AddSingleton<PlayerTokenService>();
+
+// Klucz osobno od wystawiania biletów: wczytuje się raz, trzeba go zamknąć, a przy okazji
+// zapisuje klucz publiczny dla game-serwera. Kontener zamknie go razem z hostem.
+builder.Services.AddSingleton<MatchTicketKey>();
 builder.Services.AddSingleton<MatchTicketService>();
 
 // Jedno lobby na system, więc singleton. Zegar jest jedynym miejscem, z którego wychodzi

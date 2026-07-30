@@ -256,7 +256,9 @@ go pierwszym. Po nim widać na ekranie, że lobby startuje, wypuszcza graczy i o
 > z ponownym wydaniem biletu (§3.7), czyli w etapie 2; dopisany wcześniej byłby kodem, którego
 > nikt nie woła.
 
-**Etap 2 — bilet i wejście. ⏳ ZOSTAJE SAM PODPIS.** Zrobione: endpoint ponownego wydania
+**Etap 2 — bilet i wejście. ✅ ZROBIONY.** Podpis ES256 domknięty 30.07.2026 razem z etapem E2
+[planu serwera gry](plan-serwera-gry.md) — bo dopiero game-serwer ma bilet czym weryfikować.
+Wcześniej zrobione: endpoint ponownego wydania
 (§3.7), trasa `/match/:matchId` z guardem i zaślepką zamiast mapy, nawigacja z handlera
 `MatchReady`. Klient realnie „wchodzi do gry", tylko gra jest jeszcze pusta, a bilet nadal jest
 nieprzezroczystym ciągiem bez podpisu (§3.6).

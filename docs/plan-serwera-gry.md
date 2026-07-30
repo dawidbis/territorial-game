@@ -412,9 +412,21 @@ ani jednego tiku.
 > może wykonać. Boost przy pierwszej kompilacji zażądał `_WIN32_WINNT` — bez tego Asio zakłada
 > Windows 7 i wyłącza część mechanizmów, których docelowo używa.
 
-**E2 — sieć i bilet.** Beast, sesja, backpressure, ping. ES256 po stronie meta i weryfikacja
-offline po stronie C++. Testowy klient w `tools/` (Node + protobuf-es, ten sam codegen co klient).
-*Dowód:* bilet z prawdziwej meta wpuszcza, podrobiony nie wpuszcza. **Domyka etap 2 planu alokacji.**
+**E2 — sieć i bilet. ✅ ZROBIONY (30.07.2026).** Beast, sesja, backpressure, ping/pong. ES256 po
+stronie meta i weryfikacja offline po stronie C++. Klient testowy w `client/tools/`.
+*Dowód:* klient w TypeScripcie wszedł biletem podpisanym przez .NET i odebrał 94 snapshoty w rytmie
+5 Hz przy RTT poniżej milisekundy; bilet podpisany obcym kluczem dostaje zamknięcie 1008.
+**Domyka etap 2 planu alokacji.**
+
+> **Dwa błędy, których nie znalazłyby testy jednostkowe.** Pierwszy: termin ustawiony na czas
+> handshake'u zostawał w mocy po przejściu na WebSocket, więc **każde połączenie ginęło po dziesięciu
+> sekundach** — a testy trwają milisekundy i widziały wyłącznie sukces. Drugi: akceptor trzymał
+> `io_context` przy życiu po końcu meczu, więc proces nie kończył pracy i przyjmował graczy do
+> meczu, którego już nie było. Oba wyszły przy pierwszym uruchomieniu całej ścieżki naraz i oba są
+> argumentem za tym, żeby klient testowy powstał w tym samym etapie co serwer, a nie „kiedyś potem".
+>
+> Klient testowy stoi w `client/tools/`, a nie w `gameserver/tools/` jak zapowiadał plan: używa
+> codegenu i `node_modules` klienta, więc osobny projekt npm byłby drugą kopią tego samego.
 
 **E3 — świat i keyframe.** `tmapgen`, wczytanie terenu, `owner[]`, sloty z manifestu, boty z ziarna,
 `MatchInit` + keyframe RLE, `PublicState` co 1 Hz, gaszenie procesu.

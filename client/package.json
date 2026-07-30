@@ -4,6 +4,7 @@
   "scripts": {
     "ng": "ng",
     "proto:gen": "buf generate",
+    "match": "npm run proto:gen && node --experimental-transform-types tools/match-client.ts",
     "prestart": "npm run proto:gen",
     "prebuild": "npm run proto:gen",
     "pretest": "npm run proto:gen",

@@ -39,15 +39,21 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Zależności przychodzą z vcpkg w trybie manifestowym (vcpkg.json obok tego pliku).
 find_package(protobuf CONFIG REQUIRED)
-find_package(Boost CONFIG REQUIRED COMPONENTS asio beast)
+find_package(Boost CONFIG REQUIRED COMPONENTS asio beast json)
+
+# Tylko libcrypto: TLS terminuje proxy (D9), więc proces nie ma żadnego powodu, żeby
+# umieć rozmawiać po SSL-u. Z OpenSSL-a używamy wyłącznie weryfikacji podpisu biletu.
+find_package(OpenSSL REQUIRED)
 
 # Ostrzeżenia są błędami — tak samo jak analizatory po stronie .NET. Nagłówki obcych
 # bibliotek są z tego wyłączone, bo nie mamy jak ich poprawić.
 if(MSVC)
     # /Zc:__cplusplus — MSVC domyślnie raportuje __cplusplus jako 199711, przez co
     # biblioteki wykrywające możliwości języka widzą kompilator sprzed dwóch dekad.
+    # /bigobj — szablony Beasta razem z korutynami przekraczają limit sekcji w pliku
+    # obiektowym COFF. To limit formatu z lat dziewięćdziesiątych, nie objaw problemu w kodzie.
     set(GAMESERVER_WARNINGS
-        /W4 /WX /permissive- /Zc:__cplusplus /external:anglebrackets /external:W0)
+        /W4 /WX /permissive- /Zc:__cplusplus /bigobj /external:anglebrackets /external:W0)
 
     # Determinizm (§8): bez kontrakcji i przestawiania działań zmiennoprzecinkowych.
     # W samej symulacji `float` nie ma prawa wystąpić, ale flaga kosztuje nic i zamyka
@@ -90,12 +96,18 @@ protobuf_generate(
 add_library(gameserver_core STATIC
     src/app/options.cpp
     src/app/log.cpp
+    src/meta/ticket.cpp
+    src/net/listener.cpp
+    src/net/session.cpp
     src/tick/match_clock.cpp
 )
 
 target_include_directories(gameserver_core PUBLIC src)
 
-target_link_libraries(gameserver_core PUBLIC game_proto Boost::asio Boost::beast)
+target_link_libraries(gameserver_core
+    PUBLIC game_proto Boost::asio Boost::beast
+    PRIVATE Boost::json OpenSSL::Crypto
+)
 
 if(WIN32)
     # Bez tego Asio zakłada Windows 7 i mówi o tym przy każdej kompilacji. Wersja

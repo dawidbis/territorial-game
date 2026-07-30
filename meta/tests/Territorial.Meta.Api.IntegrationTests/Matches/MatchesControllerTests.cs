@@ -52,7 +52,7 @@ public class MatchesControllerTests
             ? new ClaimsIdentity([new Claim(JwtRegisteredClaimNames.Sub, id.ToString())], "test")
             : new ClaimsIdentity();
 
-        return new MatchesController(matches, new MatchTicketService(options, TimeProvider.System))
+        return new MatchesController(matches, TestTickets.For(options))
         {
             ControllerContext = new ControllerContext
             {

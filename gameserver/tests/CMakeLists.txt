@@ -4,6 +4,8 @@ add_executable(gameserver_tests
     options_tests.cpp
     match_clock_tests.cpp
     proto_tests.cpp
+    session_tests.cpp
+    ticket_tests.cpp
 )
 
 target_link_libraries(gameserver_tests PRIVATE gameserver_core GTest::gtest GTest::gtest_main)

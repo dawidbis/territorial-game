@@ -46,13 +46,13 @@ zmienia dla gracza — plan doprowadzenia go do mapy na ekranie opisuje
 | Widok meczu | **zaślepka** — adres, licznik biletu, bez mapy |
 | Katalog map | jedna pozycja wpisana na sztywno |
 | Alokacja procesu game-serwera | **atrapa** — zwraca adres z konfiguracji, nic nie uruchamia |
-| Podpis biletu | **brak** — nieprzezroczysty ciąg; decyzja: ECDSA P-256 |
-| Serwer gry — szkielet (etap E1) | **gotowe**: proces, opcje, zegar 10/5 Hz, schemat protobuf, CI |
-| Serwer gry — gniazdo, świat, mapa | **brak** — etapy E2–E5 planu serwera gry |
+| Podpis biletu | **gotowe** — JWT ES256 (ECDSA P-256), weryfikowany offline przez serwer gry |
+| Serwer gry — szkielet (etapy E1–E2) | **gotowe**: proces, zegar 10/5 Hz, protobuf, WebSocket, bilety |
+| Serwer gry — świat, mapa, keyframe | **brak** — etapy E3–E5 planu serwera gry |
 | Konta i logowanie | **brak** — tylko goście |
 | Testy domeny i warstwy aplikacji | **47 testów, wszystkie zielone** |
-| Testy ścieżki meczu w warstwie API | **16 testów, wszystkie zielone** |
-| Testy serwera gry | **21 testów, wszystkie zielone** |
+| Testy ścieżki meczu w warstwie API | **26 testów, wszystkie zielone** |
+| Testy serwera gry | **39 testów, wszystkie zielone** |
 | Testy frontendu | **brak** (nietknięty szablon, patrz §8.3) |
 
 ---
@@ -917,6 +917,8 @@ usunięcia.
 | `Match:TicketLifetimeSeconds` | `60` | ważność biletu meczowego |
 | `Match:MatchWebSocketBaseUrl` | `wss://localhost:5001/match` | prefiks adresu meczu; pełny to `{prefiks}/{matchId}` |
 | `Match:FakeAllocatorEndpoint` | `127.0.0.1:5101` | adres oddawany przez atrapę alokatora |
+| `Match:TicketPrivateKeyPem` | brak | klucz ECDSA P-256 do podpisu biletów; w dev pusty = klucz na czas życia procesu, poza dev **wymagany** |
+| `Match:TicketPublicKeyPath` | `App_Data/ticket.pub` | dokąd meta zapisuje klucz publiczny dla serwera gry |
 
 Profil `https` nasłuchuje na `https://localhost:5001`.
 
@@ -1004,11 +1006,23 @@ Dwa generatory nie są niekonsekwencją: Ninja wymaga kompilatora na ścieżce, 
 `vcvars`, a generator Visual Studio znajduje go sam i dzięki temu `cmake --preset` działa
 z każdego terminala. **CLion nie używa żadnego z tych presetów** — patrz §8.2.
 
-Test dymny — proces przechodzi 50 tików symulacji (5 sekund) i kończy się sam:
+Uruchomienie procesu meczu. Klucz publiczny biletów zapisuje meta przy starcie, więc wystarczy
+wskazać ten sam plik; `--max-ticks` kończy mecz po podanej liczbie tików (10 na sekundę) zamiast
+czekać na sygnał:
 
 ```bash
-./build/windows-msvc/RelWithDebInfo/gameserver.exe --match-id 018f3a2b-5c7d-7e91-9a2b-3c4d5e6f7a8b --port 5101 --max-ticks 50
+./build/windows-msvc/RelWithDebInfo/gameserver.exe --match-id <guid> --port 5101 --ticket-key ../meta/src/Territorial.Meta.Api/App_Data/ticket.pub --max-ticks 600
 ```
+
+Wejście do meczu bez przeglądarki — klient testowy używa tego samego codegenu protobuf co
+aplikacja, więc sprawdza schemat także od strony TypeScriptu:
+
+```bash
+npm --prefix client run match -- --url ws://127.0.0.1:5101/match/<guid> --ticket <jwt>
+```
+
+Bilet bierze się z `POST /api/matches/{matchId}/ticket` albo z wiadomości `MatchReady`; wypisuje go
+też widok `/match/:matchId` w aplikacji.
 
 ### 8.2 Serwer gry w CLion
 
@@ -1059,7 +1073,7 @@ Uporządkowane od najbliższego do najdalszego.
 | # | Brak | Uwagi |
 |---|---|---|
 | 1 | **Serwer gry** | szkielet (E1) stoi; brakuje gniazda, świata i mapy — etapy E2–E5 z [plan-serwera-gry.md](plan-serwera-gry.md). Sama symulacja to osobny plan |
-| 2 | **Podpis biletu** | dziś nieprzezroczysty ciąg; krzywa wybrana (ECDSA P-256), zostaje implementacja |
+| 2 | ~~Podpis biletu~~ | **zrobione** — ES256 po obu stronach, etap E2 planu serwera gry |
 | 3 | **Prawdziwa alokacja** | `LocalProcessMatchAllocator`, potem agent na maszynie; dziś atrapa |
 | 4 | Odbiór wyniku meczu | `Internal/` na mTLS, idempotentny zapis po `matchId`; stan `Completed` czeka gotowy |
 | 5 | Katalog map | jedna pozycja na sztywno (`moon`, 100 aktorów); docelowo tabela z §4.2 |

@@ -502,3 +502,6 @@ client/src/proto/
 
 # Pliki terenu (D13) — 2 MB binarki wychodzące z tmapgen, nie źródło
 *.tmap
+
+# Dane środowiska deweloperskiego meta: baza i klucz publiczny biletów zapisywany przy starcie
+App_Data/

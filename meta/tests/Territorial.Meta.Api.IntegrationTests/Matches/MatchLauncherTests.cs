@@ -142,7 +142,7 @@ public class MatchLauncherTests
             lobby,
             new LobbyBroadcaster(hub),
             allocator,
-            new MatchTicketService(options, TimeProvider.System),
+            TestTickets.For(options),
             options,
             TimeProvider.System,
             scopeFactory,

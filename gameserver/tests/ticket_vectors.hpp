@@ -1,0 +1,52 @@
+#pragma once
+
+#include <cstdint>
+#include <string_view>
+
+// Wektory testowe kontraktu z meta — WYGENEROWANE, nie edytować ręcznie.
+//
+// Bilety poniżej wystawił .NET tymi samymi prymitywami, których używa MatchTicketService
+// (ECDsa.SignData, czyli surowe R‖S zgodnie z RFC 7518). To jedyne miejsce w repozytorium,
+// gdzie obie strony kontraktu spotykają się w jednym teście; wszystko inne sprawdza każdą
+// ze stron osobno.
+//
+// Termin ważności jest odległy, bo testy sesji weryfikują bilet realnym zegarem systemowym.
+// Odtworzenie: scratchpad/gen-tickets.cs
+
+namespace vectors
+{
+
+
+constexpr std::string_view match_id = "018f3a2b-5c7d-7e91-9a2b-000000000001";
+constexpr std::string_view player_id = "018f3a2b-5c7d-7e91-9a2b-3c4d5e6f7a8b";
+constexpr std::int64_t valid_until = 4102444800;
+
+constexpr std::string_view public_key_pem =
+    "-----BEGIN PUBLIC KEY-----\n"
+    "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEk6kAa/kCTAGsmFJPBHGcfjKXc1tZ\n"
+    "yp1K2JFla5vqLrVJg15SD6qP4rDohtZqU/R9MLqoyg8ernd+GmIsJZYveg==\n"
+    "-----END PUBLIC KEY-----\n"
+    ;
+
+constexpr std::string_view valid_token =
+    "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJwbGF5ZXJJZCI6IjAxOGYzYTJiLTVjN2QtN2U5MS05YTJiLTNjNGQ1ZTZmN2E4YiIsIm1hdGNoSWQiOiIwMThmM2EyYi01YzdkLTdlOTEtOWEyYi0wMDAwMDAwMDAwMDEiLCJzbG90Ijo3LCJub25jZSI6Im5vbmNlLW9uZSIsIm5iZiI6NDEwMjQ0NDc0MCwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjQxMDI0NDQ3NDB9.3bSvzX4zNurv6wHpioy0fUs9Ly2EpsFrgDS8rHBb6eh6tI5hnOd0kWqiSVQvpJT91bZt3Qu1NiIIt3KFDpA6Eg";
+
+constexpr std::string_view second_token =
+    "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJwbGF5ZXJJZCI6IjAxOGYzYTJiLTVjN2QtN2U5MS05YTJiLTNjNGQ1ZTZmN2E4YiIsIm1hdGNoSWQiOiIwMThmM2EyYi01YzdkLTdlOTEtOWEyYi0wMDAwMDAwMDAwMDEiLCJzbG90Ijo3LCJub25jZSI6Im5vbmNlLXR3byIsIm5iZiI6NDEwMjQ0NDc0MCwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjQxMDI0NDQ3NDB9.4VDTWV7kqDdCIxuJ15B97tFfJl-DsHxghAKKF_BL9jJSeeaRJbGhndyShWKK-QmdRH6gvC-A7Rpaql2ZfqxTOg";
+
+constexpr std::string_view expired_token =
+    "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJwbGF5ZXJJZCI6IjAxOGYzYTJiLTVjN2QtN2U5MS05YTJiLTNjNGQ1ZTZmN2E4YiIsIm1hdGNoSWQiOiIwMThmM2EyYi01YzdkLTdlOTEtOWEyYi0wMDAwMDAwMDAwMDEiLCJzbG90Ijo3LCJub25jZSI6Im5vbmNlLW9sZCIsIm5iZiI6MTU5OTk5OTk0MCwiZXhwIjoxNjAwMDAwMDAwLCJpYXQiOjE1OTk5OTk5NDB9.3uXifpZoHSxQ3ydhgsJ_9Vibze4uW6v95tYX5QicbuMp_5TfC4lw3Jut1iGPiUt2Ob9R80rHDtXgDm6KIInArw";
+
+constexpr std::string_view other_match_token =
+    "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJwbGF5ZXJJZCI6IjAxOGYzYTJiLTVjN2QtN2U5MS05YTJiLTNjNGQ1ZTZmN2E4YiIsIm1hdGNoSWQiOiIwMThmM2EyYi01YzdkLTdlOTEtOWEyYi0wMDAwMDAwMDAwZmYiLCJzbG90Ijo3LCJub25jZSI6Im5vbmNlLXRocmVlIiwibmJmIjo0MTAyNDQ0NzQwLCJleHAiOjQxMDI0NDQ4MDAsImlhdCI6NDEwMjQ0NDc0MH0.j_o-btOQREGUIKgbUTGA-4DouZ76akWZRTV-tKMa9EE0iY6JJSDz3CKuyxOAqG_pyAUXL0q9mgssATT8kps-xA";
+
+constexpr std::string_view slot_zero_token =
+    "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJwbGF5ZXJJZCI6IjAxOGYzYTJiLTVjN2QtN2U5MS05YTJiLTNjNGQ1ZTZmN2E4YiIsIm1hdGNoSWQiOiIwMThmM2EyYi01YzdkLTdlOTEtOWEyYi0wMDAwMDAwMDAwMDEiLCJzbG90IjowLCJub25jZSI6Im5vbmNlLWZvdXIiLCJuYmYiOjQxMDI0NDQ3NDAsImV4cCI6NDEwMjQ0NDgwMCwiaWF0Ijo0MTAyNDQ0NzQwfQ.V-GTVFJleDvGeCns1cpa-V0ElkMf2nmiSB-cYlDB3zIhG3FKVr59zeoC8QiPuFMqm-A2cSxcYyH1BY24Ev_HQQ";
+
+constexpr std::string_view slot_too_high_token =
+    "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJwbGF5ZXJJZCI6IjAxOGYzYTJiLTVjN2QtN2U5MS05YTJiLTNjNGQ1ZTZmN2E4YiIsIm1hdGNoSWQiOiIwMThmM2EyYi01YzdkLTdlOTEtOWEyYi0wMDAwMDAwMDAwMDEiLCJzbG90IjoyMDAsIm5vbmNlIjoibm9uY2UtZml2ZSIsIm5iZiI6NDEwMjQ0NDc0MCwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjQxMDI0NDQ3NDB9.oc-0EwpZ0ZheuajUQBevWAZa7ds_1pwYW9qT_tpj9AWPySCygH8otf1HNGQjeHrxbt8w6A5NIrN95EsL52AaOA";
+
+constexpr std::string_view foreign_key_token =
+    "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJwbGF5ZXJJZCI6IjAxOGYzYTJiLTVjN2QtN2U5MS05YTJiLTNjNGQ1ZTZmN2E4YiIsIm1hdGNoSWQiOiIwMThmM2EyYi01YzdkLTdlOTEtOWEyYi0wMDAwMDAwMDAwMDEiLCJzbG90Ijo3LCJub25jZSI6Im5vbmNlLXNpeCIsIm5iZiI6NDEwMjQ0NDc0MCwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjQxMDI0NDQ3NDB9.7alIngFKnAyA2u61CwsWDidSpn-X4SMSs3sKSf2nfY0XvFMmsnYRZQGo35Um_ibFnC4A1eBPXqPbfCLwjjgtXA";
+
+} // namespace vectors
