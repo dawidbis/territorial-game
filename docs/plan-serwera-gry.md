@@ -254,6 +254,24 @@ Wymiarów ani sumy kontrolnej tu nie ma **celowo** — wychodzą z obrazka i z `
 raz zaczęłyby kłamać przy pierwszej zmianie mapy. To dokładnie ta reszta, której potrzebuje
 `MapDefinition` z §4.2 dokumentu architektury.
 
+> **Korekta (31.07.2026): nagłówek `.tmap` niesie więcej, niż zapowiada D13.** Punkty startowe
+> i identyfikator mapy jadą **w tym samym pliku co teren**, a nie osobno. Powód wyszedł przy
+> pisaniu walidacji: to konwerter sprawdza, czy spawn stoi na lądzie i na głównym kontynencie,
+> więc rozdzielony na drugi plik przeszedłby walidację raz, a potem rozjechał się z siatką przy
+> pierwszej poprawce pędzlem. Przy okazji orkiestrator przekazuje procesowi jedną ścieżkę zamiast
+> dwóch, a `mapSha256` poświadcza całość.
+>
+> ```
+>  0   4  "TMAP"          10  1  liczba typów terenu     16  4  offset terenu
+>  4   2  wersja formatu  11  1  długość identyfikatora  20  …  identyfikator (ASCII)
+>  6   2  szerokość       12  2  liczba spawnów              …  spawny, po 2 × u16
+>  8   2  wysokość        14  2  rezerwa              offset: width × height bajtów
+> ```
+>
+> Offset terenu stoi wprost w nagłówku, mimo że da się go policzyć — dzięki temu przeglądarka
+> dalej robi `new Uint8Array(buf, offset)` i **nigdy nie musi wiedzieć o sekcjach, których nie
+> czyta**. To jest cała cena za trzymanie mapy w jednym pliku: cztery bajty.
+
 #### Cztery typy terenu
 
 Tyle wynika z mechaniki, a nie z upodobania: w v1 istnieje jedna reguła patrząca na teren — koszt
@@ -312,6 +330,17 @@ Do czasu, aż powstanie pierwsza narysowana mapa, ten sam program w trybie `--sy
 teren deterministycznie z ziarna. Nie udaje mapy do grania — ma dać keyframe o realistycznym
 rozmiarze, żeby dało się sprawdzić budżet z §7.
 
+> **Korekta (31.07.2026): katalog map oddaje w dev `synthetic`, nie `moon`.** Wyszło przy spinaniu
+> z meta: alokator szuka pliku po identyfikatorze mapy, a `moon.tmap` nie istnieje i nie będzie
+> istniał, dopóki ktoś nie narysuje `moon.png`. Katalog obiecujący mapę, której nie ma, kończy się
+> procesem padającym przy starcie i lobby, które zawsze zgłasza `MatchStartFailed`. Identyfikator
+> zgadza się teraz z nazwą pliku, a `moon` wraca do `InMemoryMapCatalog` razem z pierwszym
+> narysowanym obrazkiem.
+>
+> Konsekwencja dla świeżego klonu: `.tmap` jest artefaktem i nie leży w repozytorium, więc **przed
+> pierwszym uruchomieniem trzeba go zrobić** — `tmapgen --synthetic --out maps/synthetic.tmap`.
+> Bez tego pliku meta nie ma czego podać procesowi, a komunikat błędu podaje tę komendę wprost.
+
 **Edytor map wchodzi później i nic z tego nie unieważnia**: pędzle, stawianie spawnów i podgląd
 to osobny kawałek roboty, a jego wynikiem będzie ta sama para plików.
 
@@ -323,6 +352,12 @@ keyframe.cpp  RLE row-major → OwnershipRun[]
 
 Ładna właściwość: **keyframe szkieletu nie jest pusty.** Woda daje realne runy, więc pierwsza
 wiadomość ma kilkadziesiąt kilobajtów i mierzy się w niej dokładnie to, co §7 przewiduje.
+
+> **Doprecyzowanie (31.07.2026): keyframe nie wypisuje pustkowi.** Klient zeruje `owner[]`
+> i nakłada na to runy, więc kafelki niczyje opisuje sama ich nieobecność — a `start_delta` z §6
+> dokumentu architektury dostaje wtedy sens, który miał mieć: jest długością przerwy, a nie zawsze
+> zerem. Woda jedzie mimo tego, że klient ma ją też w terenie, bo dzięki temu keyframe opisuje
+> `owner[]` **w całości** i klient nie musi łączyć dwóch źródeł, żeby wiedzieć, czyj jest kafelek.
 
 > **`mmap` — nie teraz.** D13 zakłada `mmap` read-only i współdzielenie jednego mapowania przez
 > wszystkie procesy na maszynie. To POSIX; na Windowsie odpowiednikiem jest `CreateFileMapping`,
@@ -445,7 +480,7 @@ A game-serwer z D9 mówi gołym `ws://`, bo TLS ma terminować proxy.
 Rozwiązanie jest tym, czym i tak jest produkcja: **proxy**. Dev-server Angulara umie to zrobić sam.
 
 ```jsonc
-// client/proxy.conf.json — podpięty w angular.json jako "proxyConfig" w opcjach serve
+// Kształt zaplanowany; wykonanie stoi dziś w client/proxy.conf.mjs — patrz "Konsekwencja" niżej
 {
   "/match": { "target": "ws://127.0.0.1:5101", "ws": true },
   "/maps":  { "target": "https://localhost:5001", "secure": false }
@@ -458,8 +493,10 @@ z D9, więc ścieżka dev i ścieżka produkcyjna różnią się wyłącznie tym
 wpisem idzie `/maps` do meta, żeby teren przychodził spod tego samego origin co reszta — na
 produkcji stoi tam CDN i klient nie zauważa różnicy.
 
-**Konsekwencja:** w dev port jest stały (5101), bo cel proxy jest wpisany w plik. To wystarcza,
-dopóki na maszynie stoi jeden mecz naraz — czyli przez cały szkielet.
+**Konsekwencja:** cele proxy są wpisane w plik, więc mapowanie `matchId → proces` — zmienne co mecz
+— nie ma jak z niego wyjść. Założenie „jeden mecz naraz na maszynie" okazało się za ciasne jeszcze
+w szkielecie (patrz notatka przy E5), więc portów jest pula, a wybór wpisu niesie ścieżka:
+`/ws/match/gs{N}/{matchId}`. Aktualny kształt opisuje §7.2 dokumentacji aplikacji.
 
 ---
 
@@ -516,19 +553,113 @@ stronie meta i weryfikacja offline po stronie C++. Klient testowy w `client/tool
 > Klient testowy stoi w `client/tools/`, a nie w `gameserver/tools/` jak zapowiadał plan: używa
 > codegenu i `node_modules` klienta, więc osobny projekt npm byłby drugą kopią tego samego.
 
-**E3 — świat i keyframe.** `tmapgen` (konwersja PNG + JSON → `.tmap`, walidacja, tryb
-`--synthetic`), wczytanie terenu, `owner[]`, sloty z manifestu, boty z ziarna, punkty startowe,
-`MatchInit` + keyframe RLE, `PublicState` co 1 Hz, gaszenie procesu.
-*Dowód:* testowy klient dostaje keyframe i liczy runy; rozmiar zgadza się z §7 (60–80 KB).
+**E3a — mapa i keyframe. ✅ ZROBIONY (31.07.2026).** Format `.tmap`, `tmapgen` (konwersja
+PNG + JSON → `.tmap`, walidacja, tryb `--synthetic`), własny czytnik PNG, wczytanie terenu
+z sumą kontrolną, `owner[]` z wodą jako 255, punkty startowe, `MatchInit` + keyframe RLE wysyłane
+zaraz po przyjęciu biletu. 43 nowe testy, razem 82.
+*Dowód:* klient w TypeScripcie wszedł biletem i odebrał `MatchInit` z mapą 2000×1000 oraz keyframe
+o **5192 runach obejmujących 886 071 kafelków w 50 783 bajtach** — liczba kafelków co do jednego
+zgadza się z liczbą wody, którą wypisał konwerter, a `mapSha256` z `MatchInit` z sumą kontrolną
+pliku na dysku.
 
-**E4 — spięcie z meta.** `LocalProcessMatchAllocator`, `proxy.conf.json`, manifest przez stdin,
-serwowanie `/maps` w dev.
-*Dowód:* odliczanie lobby dobija do zera i **prawdziwy proces** przyjmuje prawdziwą przeglądarkę.
+> **Keyframe wyszedł mniejszy, niż zapowiadał §7 dokumentu architektury** (50 KB zamiast 60–80 KB),
+> bo szacunek zakładał wypisywanie wszystkich runów, a pustkowia są pomijane. Wraz z ekspansją
+> będzie rósł: 100 terytoriów tnie każdy wiersz kilkanaście razy, więc pod koniec meczu należy
+> spodziewać się wielokrotności tej liczby. To jest moment, w którym warto zmierzyć ponownie —
+> **budżet z §7 dotyczy keyframe'a w środku meczu, a nie na jego początku.**
 
-**E5 — mapa na ekranie.** Worker, `OffscreenCanvas`, kamera, paleta slotów, sprawdzenie
-`mapSha256`, reconnect podpięty do gniazda.
-*Dowód:* **kryterium z §1** — gracz wchodzi z lobby, widzi mapę, wychodzi, wraca po F5 i widzi ją
-znowu.
+**E3b — roster i cykl życia. ✅ ZROBIONY (31.07.2026).** Manifest przez stdin, sloty z nickami
+i kolorami, boty generowane z ziarna, postawienie aktorów na punktach startowych, `PublicState`
+co 1 Hz, trzy warunki gaszenia procesu (§3.7), PCG jako jedyne źródło losowości. 30 nowych testów,
+razem 112.
+*Dowód:* manifest z dwoma graczami wszedł stdinem, `MatchInit` przyniósł **stu aktorów — dwóch ludzi
+i 98 botów** — a keyframe urósł z 5192 do 5292 runów i ze 101 właścicielami, czyli dokładnie
+o setkę kafelków zajętych przez aktorów. Ranking szedł co dziesiąty tik. Gaszenie sprawdzone
+w prawdziwym przebiegu, nie tylko w testach: proces bez gracza padł po **1200 tikach co do jednego**
+z kodem 1, a proces po wyjściu ostatniego — 1200 tików później z kodem 0. Zegar nie zgubił ani
+jednego tiku w żadnym z nich.
+
+> **Nick i kolor bota są funkcją ziarna i numeru slotu, a nie kolejności losowań.** Różnica wychodzi
+> dopiero przy replayu: gdyby boty czerpały ze wspólnego strumienia po kolei, dopisanie jednego
+> gracza przesunęłoby wszystkie pozostałe i mecz odtworzony po zmianie rostera byłby innym meczem.
+> Stąd strumień PCG per slot i permutacja przestrzeni 256 nicków zamiast niezależnych losowań —
+> te ostatnie dawałyby kolizje nicków jako regułę, nie wyjątek.
+
+**E4 — spięcie z meta. ✅ ZROBIONY (31.07.2026).** `LocalProcessMatchAllocator` (start procesu,
+manifest na stdin, czekanie na gotowość sondą TCP), budowa manifestu i konwersja HSV → RGB
+w warstwie aplikacji, `Match:Allocator` przełączający atrapę na proces, `proxy.conf.json`
+wpięty w `angular.json`, serwowanie `/maps/{mapId}/{sha256}/terrain.bin` w dev. Testów
+przybyło po obu stronach: 13 po stronie meta (razem 87) i dwa w C++ (razem 114).
+*Dowód:* przeglądarka dołączyła do lobby, odliczanie dobiło do zera i **prawdziwy proces**
+(pid 9020) stanął na 5101 — a gracz dostał `wss://localhost:4200/match/{id}`. Tym adresem,
+czyli **przez proxy**, wszedł klient testowy: `MatchInit` z mapą `synthetic` 2000×1000, slot 1,
+stu aktorów (jeden człowiek, 99 botów), keyframe **5292 runy obejmujące 886 171 kafelków
+w 51 612 bajtach**, 101 snapshotów przy RTT 1 ms. Proces zgasł sam 120 sekund po wyjściu
+gracza — „ostatni gracz nie wrócił", 2191 tików, **0 przepadło**.
+
+> **Kolor gracza wrócił jako `#3f95e0`** i to jest najcichszy dowód w tym etapie: HSV
+> z profilu przeliczyła meta, wartość przeszła stdinem przez proces, który o istnieniu HSV
+> nie wie, i wróciła w `MatchInit`. Odwrotna konwersja daje nasycenie 72 i jasność 88 co do
+> jednego — czyli dokładnie wartości domyślne z domeny.
+>
+> **Trzy rzeczy wyszły inaczej, niż zapowiadał plan.** Katalog map oddawał `moon`, dla
+> którego nie istnieje ani jeden bajt terenu — pierwsza alokacja padłaby na braku pliku,
+> więc do czasu pierwszej narysowanej mapy katalog wskazuje `synthetic`, czyli nazwę, która
+> zgadza się z plikiem. Sufit nicku w manifeście liczył 32 **bajty**, podczas gdy meta liczy
+> 20 **znaków**: nick z siedemnastoma polskimi ogonkami nie przeszedłby, a mecz nie wstałby
+> dla gracza, którego meta uznaje za poprawnego. I najciekawsza: `log::write` nie robił
+> flusha, a `std::cout` przekierowany na potok jest w pełni buforowany — **pod orkiestratorem
+> logi procesu wisiały w buforze do jego śmierci**. Widać to było jako cztery linie startowe
+> pojawiające się cztery minuty później, jednym blokiem, razem z komunikatem o końcu meczu.
+> W konsoli usterki nie widać w ogóle, bo tam bufor kończy się na nowej linii — czyli
+> ujawniłaby się dopiero na produkcji, gdzie wyjście zbiera agent.
+
+> **Widok meczu nadal nie otwiera gniazda** — to jest zadanie E5. Dlatego ostatni krok dowodu
+> robi klient testowy, ale **tym samym adresem i tym samym biletem**, które dostała
+> przeglądarka. Sprawdzone jest więc wszystko poza kodem, który dopiero powstanie.
+
+**E5 — mapa na ekranie. ✅ ZROBIONY (01.08.2026).** Worker z gniazdem, protobufem i `owner[]`,
+`OffscreenCanvas` z paletą 256 × 4, kamera (przesuwanie, zoom wokół kursora), pobranie terenu
+spod `/maps` z weryfikacją `mapSha256`, reconnect podpięty do gniazda, komunikat zamiast
+czarnego ekranu na przeglądarce bez `OffscreenCanvas`. 17 testów frontendu — **pierwszych
+w repozytorium**.
+*Dowód:* **kryterium z §1 spełnione**. Gracz wszedł z lobby, zobaczył mapę 2000×1000 — woda
+granatowa, ląd w trzech odcieniach, kontynenty o ciągłych kształtach — odświeżył stronę i zobaczył
+ją znowu, w tym samym meczu, ze świeżym biletem i keyframem 5292 runów. Połączenie przeżyło
+2082 tiki bez zerwania.
+
+> **Trzy rzeczy wyszły dopiero z uruchomienia, żadnej nie złapałby test jednostkowy.**
+>
+> **Trasa SPA kolidowała z endpointem gniazda.** Klient ma trasę `/match/{matchId}`, a proxy
+> oddawało `/match` procesowi meczu — więc **odświeżenie strony w trakcie meczu wysyłało żądanie
+> dokumentu HTML na WebSocket** i aplikacja w ogóle się nie ładowała. Czyli dokładnie kryterium
+> z §1 było zepsute, i to nie w dev: wspólne wejście routuje po ścieżce (D9), więc ingress
+> produkcyjny miałby ten sam problem. Gniazdo stoi teraz pod `/ws/match/{matchId}`, a w testach
+> C++ jest asercja, że ścieżka SPA upgrade'u **nie** dostaje.
+>
+> **Worker nigdy nie startował**, bo `queueMicrotask` w konstruktorze komponentu biegnie zanim
+> widok się wyrenderuje — `viewChild` był pusty, `start()` cicho odpadał i nie ponawiał. Objaw
+> mylił: pasek pokazywał „connecting", ale to była **wartość początkowa sygnału**, nie wiadomość
+> od workera. Wniosek na przyszłość: stan, który wygląda tak samo przed pierwszą wiadomością
+> i po awarii, to stan bezużyteczny w diagnozie.
+>
+> **Zajęty port okazał się ostrzejszy, niż zapisano przy E4** — i wymagał naprawy, nie adnotacji.
+> Proces meczu dożywa 120 s po wyjściu ostatniego gracza, więc każde lobby otwarte w tym oknie
+> kończyło się `MatchStartFailed`; przy dwóch klientach naraz jeden gracz odbierał drugiemu
+> możliwość gry, a po wyjściu z własnego meczu nie dało się zacząć następnego. Błąd był w tym,
+> że alokator traktował stan **przejściowy i normalny** jak awarię. Teraz na port czeka
+> (ograniczenie w `Match:PortWaitMilliseconds`), a proces dostaje w dev `--idle-seconds 20`,
+> więc zwalnia gniazdo szybciej. Twardego limitu meczu ta opcja nie dotyka — obietnicy z D7 nie
+> da się skrócić przez przypadek.
+>
+> **To załatwiło jednak tylko połowę.** Czekanie leczy port, który za chwilę się zwolni; nie leczy
+> portu zajętego przez mecz, który **trwa**. Gracz, który wyszedł z rozgrywki i wrócił do kolejki,
+> nadal nie mógł zacząć następnej, dopóki grali w tamtej pozostali — a to nie jest okno kilku
+> sekund, tylko czas całego meczu. Właściwą odpowiedzią był dopiero rozmiar puli: alokator bierze
+> pierwszy wolny port z `Match:GameServerPort` + `Match:GameServerPortCount`, a numer wpisu jedzie
+> w ścieżce jako `gs{N}`, bo dev-server nie umie wybierać celu per żądanie. Wniosek na przyszłość:
+> „to tylko dev, mecze i tak chodzą po kolei" było **założeniem o użytkowniku**, nie o środowisku —
+> i przestało być prawdą przy drugim człowieku przy klawiaturze.
 
 Symulacja (ekspansja, ekonomia, miasta, boty) to osobny plan po E5. Wchodzi w gotową ramę: delty
 mają już czym jechać, kanwa ma już co odświeżać, a jedyne, co dojdzie po stronie klienta, to
@@ -558,6 +689,16 @@ a wtedy dwie niezależne implementacje rozjeżdżają się po cichu.
 Generacja proceduralna odpada nie z lenistwa, tylko dlatego, że dokument architektury opiera balans
 na ręcznie postawionych punktach startowych (§4.2). Tryb `--synthetic` istnieje wyłącznie po to,
 żeby E3 miało jakiekolwiek bajty, zanim powstanie pierwsza narysowana mapa.
+
+> **Korekta (31.07.2026): PNG czyta własny czytnik na zlib, nie `stb_image`.** Wychodzi na to samo
+> pod względem zależności — zlib i tak wchodzi tranzytywnie z protobufem, a `stb_image` wymagałby
+> wrzucenia do repozytorium 280 KB cudzego kodu. Argumentem, który przeważył, jest jednak co
+> innego: `stb_image` jest **biblioteką ogólnego przeznaczenia i jego zadaniem jest otworzyć każdy
+> plik**, więc 16 bitów na kanał sprowadzi do 8, a paletę rozwinie — cicho. Nasz czytnik przyjmuje
+> wyłącznie 8-bitowy RGB/RGBA bez przeplotu i wszystko inne odrzuca z nazwą tego, co nie pasuje.
+> To ta sama zasada, co „nieznany kolor piksela to błąd, nie najbliższe dopasowanie": mapa jest
+> siatką danych udającą obrazek. Sprawdza przy okazji sumy kontrolne bloków, więc plik urwany przy
+> kopiowaniu wychodzi przy konwersji, a nie jako dziura w terenie.
 
 > **Do rozstrzygnięcia (gameplay).** Czy góry są przejezdne i czy progi kosztu 1/2/4 są właściwe.
 > Rekomendacja: **przejezdne** — nieprzejezdne przy ataku „po całej szerokości granicy" potrafią

@@ -3,7 +3,7 @@
 Opis **tego, co jest faktycznie zaimplementowane** w repozytorium — funkcjonalności, kontrakty,
 konfiguracja, uruchomienie.
 
-**Status:** v1 pre-alpha (meta-serwer + klient; serwer gry przyjmuje graczy, ale nie ma świata)
+**Status:** v1 pre-alpha (meta-serwer + klient; serwer gry prowadzi mecz bez symulacji)
 **Aktualność:** 31.07.2026
 
 > **Relacja do drugiego dokumentu.** [architektura-gry-terytorialnej.md](architektura-gry-terytorialnej.md)
@@ -21,12 +21,25 @@ dobija do zera, lobby zamraża roster, zakłada mecz, rozdaje bilety i otwiera n
 
 Czego **nie ma**: samej rozgrywki. Nie istnieje mapa, symulacja ani ekspansja terytorium.
 
-Serwer gry ma od 31.07.2026 **działające wejście**: proces w C++ przyjmuje połączenie
-WebSocketem, weryfikuje podpisany bilet bez pytania meta o zdanie i wysyła snapshoty 5 Hz —
-puste, bo nie ma jeszcze świata, który mógłby się w nich zmienić (§4.15). Brakuje ostatniego
-ogniwa automatyzacji: alokator jest wciąż atrapą (§4.9), więc proces meczu trzeba na razie
-uruchomić ręcznie i podać klientowi adres. Plan doprowadzenia gracza do mapy na ekranie opisuje
-[plan-serwera-gry.md](plan-serwera-gry.md).
+Serwer gry od 31.07.2026 **prowadzi cały mecz poza samą rozgrywką**: proces w C++ przyjmuje
+połączenie WebSocketem, weryfikuje podpisany bilet bez pytania meta o zdanie, wczytuje teren
+z pliku `.tmap`, bierze roster manifestem ze stdin, dopełnia go botami z ziarna meczu, stawia
+wszystkich na punktach startowych i wysyła wchodzącemu `MatchInit` z obsadą oraz keyframe całej
+mapy (§4.15, §4.16, §4.17). Gasi się też sam — po braku graczy albo po twardym limicie czasu.
+
+Od 31.07.2026 **nikt nie uruchamia tego procesu ręcznie**: meta stawia go sama, gdy lobby dobije
+do zera, podaje mu roster stdinem i czeka, aż zacznie nasłuchiwać, zanim rozda bilety (§4.18).
+Odliczanie w przeglądarce kończy się więc prawdziwym meczem, a nie adresem, pod którym nikogo
+nie ma.
+
+Od 01.08.2026 **gracz widzi mapę**: widok meczu oddaje kanwę workerowi, ten otwiera gniazdo,
+pobiera teren, składa z keyframe'a tablicę właścicieli i maluje dwa miliony kafelków (§4.19).
+Przesuwanie i zoom działają, a odświeżenie strony wraca do tego samego meczu.
+
+Czego nie ma: **symulacji**. Snapshoty 5 Hz niosą numer tiku i raz na sekundę ranking, ale nic
+się w nich nie zmienia, bo nikt nie zajmuje kafelków — każdy z aktorów stoi na swoim jednym
+kafelku startowym. Plan doprowadzenia do tego miejsca opisuje
+[plan-serwera-gry.md](plan-serwera-gry.md); symulacja to osobny plan po nim.
 
 ### 1.1 Mapa stanu implementacji
 
@@ -43,20 +56,30 @@ uruchomić ręcznie i podać klientowi adres. Plan doprowadzenia gracza do mapy 
 | Trasa `/match/:matchId`, guard, ponowne wydanie biletu | **gotowe** |
 | Persystencja gracza i meczu (EF Core + SQLite) | **gotowe** |
 | Widoki `guide` i `contact` | **zaślepki** („in progres...") |
-| Widok meczu | **zaślepka** — adres, licznik biletu, bez mapy i bez połączenia z procesem |
+| Widok meczu: kanwa, mapa, przesuwanie i zoom | **gotowe** (§4.19) |
 | Wejście do meczu: WebSocket, weryfikacja biletu, snapshoty | **gotowe** po stronie serwera (§4.15) |
 | Klient testowy meczu (Node, bez przeglądarki) | **gotowe** |
 | Pipeline CI (serwer gry, dwie platformy) | **gotowe** (§6.4) |
 | Katalog map | jedna pozycja wpisana na sztywno |
-| Alokacja procesu game-serwera | **atrapa** — zwraca adres z konfiguracji, nic nie uruchamia |
+| Format pliku terenu `.tmap` i konwerter `tmapgen` | **gotowe** (§4.16) |
+| Mapa w meczu: `MatchInit` + keyframe RLE po wejściu | **gotowe** (§4.15) |
+| Alokacja procesu game-serwera | **gotowe w dev** — meta uruchamia proces i czeka na gotowość (§4.18); atrapa zostaje pod `Match:Allocator` |
+| Proxy dev-servera (`wss://localhost:4200/ws/match`) | **gotowe** (§7.2) — klient nie widzi portu procesu |
+| Serwowanie terenu klientowi (`/maps/...`) | **gotowe w dev** (§5.1); docelowo CDN |
 | Podpis biletu | **gotowe** — JWT ES256 (ECDSA P-256), weryfikowany offline przez serwer gry |
-| Serwer gry — szkielet (etapy E1–E2) | **gotowe**: proces, zegar 10/5 Hz, protobuf, WebSocket, bilety |
-| Serwer gry — świat, mapa, keyframe | **brak** — etapy E3–E5 planu serwera gry |
+| Serwer gry — szkielet (etapy E1–E2) | **gotowe**: proces, zegar 10 Hz, protobuf, WebSocket, bilety |
+| Serwer gry — roster: sloty z manifestu, boty z ziarna | **gotowe** (§4.17) |
+| Serwer gry — ranking `PublicState` co 1 Hz | **gotowe** |
+| Serwer gry — gaszenie procesu (trzy warunki) | **gotowe** (§4.17) |
+| Serwer gry — symulacja: przyrost ludzi, złoto, podatek, miasta, podbój terytorium | **gotowe** (§4.20) |
+| Serwer gry — decyzje botów | **brak** — boty rosną i bronią się, ale same nie atakują |
+| Klient — mapa na ekranie (worker, `OffscreenCanvas`) | **gotowe** (§4.19) |
+| Klient — reconnect po zerwaniu i po odświeżeniu strony | **gotowe** (§4.19) |
 | Konta i logowanie | **brak** — tylko goście |
-| Testy domeny i warstwy aplikacji | **47 testów, wszystkie zielone** |
-| Testy ścieżki meczu w warstwie API | **26 testów, wszystkie zielone** |
-| Testy serwera gry | **39 testów, wszystkie zielone** |
-| Testy frontendu | **brak** (nietknięty szablon, patrz §6.5) |
+| Testy domeny i warstwy aplikacji | **66 testów, wszystkie zielone** |
+| Testy ścieżki meczu w warstwie API | **32 testy, wszystkie zielone** |
+| Testy serwera gry | **156 testów, wszystkie zielone** |
+| Testy frontendu | **47 testów, wszystkie zielone** (§6.5) |
 
 ---
 
@@ -75,7 +98,8 @@ territorial-game/
 ├── client/                       Angular
 │   ├── src/
 │   │   ├── core/                 serwisy, interceptor, guard, funkcje pomocnicze
-│   │   ├── features/             home, lobby, profile, guide, contact
+│   │   ├── features/             home, lobby, match, profile, guide, contact
+│   │   │   └── match/            worker gniazda, renderer, kamera, paleta (§4.19)
 │   │   ├── layout/nav/           nawigacja + plakietka lobby
 │   │   ├── types/                kontrakty API jako typy TS
 │   │   └── environments/
@@ -88,11 +112,18 @@ territorial-game/
 │   │   └── Territorial.Meta.Api/             kontrolery, hub, auth, zegar, kompozycja
 │   └── tests/
 ├── gameserver/                   serwer pojedynczego meczu (C++23, CMake + vcpkg)
-│   ├── src/app/                  opcje wiersza poleceń, logowanie
-│   ├── src/meta/                 weryfikacja biletu ES256 (OpenSSL), offline
-│   ├── src/net/                  akceptor i sesja WebSocketa (Boost.Beast, korutyny)
-│   ├── src/tick/                 zegar meczu (korutyna): 10 Hz sim / 5 Hz wysyłka
+│   ├── src/app/                  opcje, log, wczytanie zasobów meczu (startup) i pętla (match_runner)
+│   ├── src/map/                  format .tmap, czytnik PNG, wczytanie terenu
+│   ├── src/meta/                 bilet ES256 (OpenSSL) i manifest rostera — oba offline
+│   ├── src/net/                  akceptor, sesja WebSocketa, rejestr sesji, rozkazy z protokołu
+│   ├── src/sim/                  RNG (PCG), roster, świat, ekonomia, natarcia i podbój
+│   ├── src/state/                keyframe RLE, snapshoty, MatchInit, okno wysyłki
+│   ├── src/tick/                 zegar meczu (korutyna) i warunki gaszenia procesu
+│   ├── tools/tmapgen/            konwerter PNG + JSON → .tmap
+│   ├── tools/run-clang-tidy.ps1  analiza statyczna — ta sama lokalnie i w CI (§6.4)
+│   ├── .clang-tidy               zestaw reguł z uzasadnieniem każdego wyłączenia
 │   └── tests/                    GoogleTest
+├── maps/                         źródła map; pliki .tmap są artefaktem (.gitignore)
 ├── proto/                        game.proto — wspólny kontrakt meczu (D2)
 └── docs/
 ```
@@ -147,9 +178,9 @@ Management), razem z dwoma wymuszonymi podniesieniami zależności przechodnich 
    guard:   po odświeżeniu strony dobiera bilet przez POST /api/matches/{id}/ticket
 
 ⑦ Mecz                                                  ⟵ dziś tylko ręcznie, patrz §4.15
-   klient → ws  /match/{matchId}      ClientHello { ticket }
+   klient → ws  /ws/match/{matchId}   ClientHello { ticket }
    proces:  weryfikuje podpis ES256 OFFLINE, bez pytania meta o zdanie
-   proces → Snapshot 5 Hz             na razie sam numer tiku
+   proces → Snapshot 10 Hz            stan terytorium, ranking co sekundę
 
 ⑧ Wyjście
    klient → invoke Leave()  →  usunięcie z rostera i z grupy
@@ -378,6 +409,18 @@ powstaje nowe (D7: ograniczony czas życia zamiast migracji stanu).
 startuje od nowa, mierzone **od teraz**, a nie od przegapionej chwili — licznik biegnie cyklicznie
 zawsze.
 
+> **Przeskok licznika ma dwie przyczyny i obie wyglądają tak samo.** Lobby z graczami idzie przez
+> `Starting` i zostaje zastąpione nowym; lobby puste dostaje tylko nowy `startsAt`, bez żadnej
+> zmiany stanu. W obu przypadkach zegar skacze z 0:00 na 1:00 w jednej klatce, a razem z nim
+> podmienia się nazwa mapy, liczba graczy i roster.
+>
+> Klient zasłania to na czas przejścia — `LobbyTransition` przykrywa **cały panel** czarnym
+> ekranem z godłem (§4.11). Wyzwalaczem jest sam fakt, że **termin przesunął się w przyszłość**,
+> a nie konkretny stan lobby: gdyby patrzeć na `Starting`, częstszy z dwóch przypadków — pusta
+> strona główna — zostałby nieobsłużony. Zasłona trwa co najmniej 800 ms, bo przy zresetowanym
+> oknie przeskok jest natychmiastowy i nie ma czego przeczekać. Napis mówi, co się dzieje
+> naprawdę: `allocating server...` przy starcie meczu, `new window...` przy nowym oknie.
+
 **Wyniki próby dołączenia** (`JoinResult`) — klient musi umieć pokazać każdy:
 
 | Wynik | Znaczenie | Komunikat u gracza |
@@ -406,9 +449,9 @@ oknie — `Starting` staje się wtedy nieosiągalne, co bywa wygodne przy pracy 
 ### 4.9 Start meczu: alokacja, bilety, nowe lobby
 
 Etapy 1 i 2 planu z [plan-alokacji-meczu.md](plan-alokacji-meczu.md): wszystko między „lobby dobiło
-do terminu" a „gracz ma w ręku adres i bilet". Bilet jest **podpisany** (ES256) i po drugiej stronie
-stoi już coś, co go weryfikuje (§4.15) — brakuje wyłącznie uruchomienia procesu, bo alokator jest
-atrapą i oddaje adres wpisany w konfiguracji.
+do terminu" a „gracz ma w ręku adres i bilet". Bilet jest **podpisany** (ES256), po drugiej stronie
+stoi coś, co go weryfikuje (§4.15), a od 31.07.2026 alokator **naprawdę uruchamia proces** i czeka,
+aż ten zacznie nasłuchiwać (§4.18) — bilety wychodzą dopiero wtedy.
 
 ```
 ① zegar        Lobby.Advance → Starting        roster ZAMROŻONY, Join odbija się o NotGathering
@@ -417,7 +460,7 @@ atrapą i oddaje adres wpisany w konfiguracji.
 
 ② launcher     Match.Create: sloty 1..N ludziom w kolejności rostera, N+1..MaxActors botom
                zapis Match + MatchParticipant                     ← PRZED rozmową z alokatorem
-               IMatchAllocator.AllocateAsync                      ← 3 próby, atrapa w etapie 1
+               IMatchAllocator.AllocateAsync(… + manifest)        ← 3 próby; w dev stawia proces
                Match.MarkLive(endpoint)
 
 ③ bilety       Clients.User(playerId).MatchReady { matchId, wsUrl, ticket, expiresAt }
@@ -515,9 +558,35 @@ profilu, poradnika ani lobby:
 |---|---|---|
 | `/` | strona główna | wizytówka lobby + licznik + „join lobby"; guard, patrz niżej |
 | `/lobby` | lobby | wizytówka + lista graczy + „leave lobby" |
+| `/match/:matchId` | mecz | kanwa mapy; **bez nawigacji i bez nakładek kineskopu** (§4.19) |
 | `/profile` | profil | nick i kolor |
 | `/guide` | poradnik | zaślepka |
 | `/contact` | kontakt | zaślepka |
+
+**Mecz jest stanem wyłącznym.** W trakcie rozgrywki nie ma dokąd wyjść — slot jest zajęty,
+terytorium istnieje dalej, a lobby i profil pokazywałyby stan, którego gracz i tak nie może
+zmienić. Rozwiązane tak samo trzema warstwami, ale twardziej niż w lobby:
+
+1. **Nawigacja znika z ekranu.** Widoczne, lecz nieklikalne menu byłoby obietnicą bez pokrycia.
+2. Guard `redirectPlayersToMatch` stoi na **każdej** trasie poza samym meczem i odsyła do niego.
+3. Guard pyta `GET /api/matches/mine`, gdy pamięć jest pusta — dzięki temu blokada **przeżywa
+   odświeżenie strony i zamknięcie karty**, a nie tylko klikanie po menu. Pytanie idzie raz na
+   wejście do aplikacji, bo odpowiedź przecząca zmienia się wyłącznie przez `MatchReady`, który
+   i tak ustawia stan sam.
+
+**Wyjście jest jawne i nieodwracalne.** Przycisk „opuść mecz" stoi w pasku stanu i woła
+`POST /api/matches/{matchId}/leave`; od tej chwili meta nie wyda już biletu do tego meczu i
+przestaje go widzieć w odpowiedzi na „w czym gram". Alternatywą byłoby zamknięcie karty, czyli
+decyzja podjęta przez nieuwagę — skoro rozgrywka jest stanem wyłącznym, musi mieć drzwi, a nie
+tylko okno.
+
+**Slotu nie zwalniamy i nie mówimy o tym procesowi meczu.** Terytorium gracza istnieje dalej,
+a jego aktor jest prowadzony do końca; meta odnotowuje wyłącznie to, że ten człowiek nie wróci.
+Wiersz uczestnika **zostaje** — gracz był w tym meczu i historia ma to pokazywać.
+
+Gdy serwer wyjścia nie przyjmie — najczęściej dlatego, że proces meczu padł, a meta wciąż uważa
+mecz za żywy (§9) — decyzja zapisuje się lokalnie w `sessionStorage`. To furtka na jedno
+nieporozumienie, nie druga ścieżka: przeżywa odświeżenie, ale nie zamknięcie karty.
 
 **Gracz w lobby nie może wrócić na stronę główną.** Pokazuje ona to samo lobby, tylko bez listy
 graczy — dla kogoś, kto już dołączył, jest krokiem wstecz. Rozwiązane trzema warstwami:
@@ -557,7 +626,8 @@ dostaje suwaka.
 ### 4.11 Warstwa wizualna
 
 Motyw DaisyUI `crt` — zielony monochrom na czerni, monospace, zerowe promienie zaokrągleń.
-Efekty w `styles.css`:
+**Jedyny wyjątek to nakładka meczu** (§4.19): leży na kolorowej mapie, więc ma własną, ciemnogranatową
+skórę i zaokrąglenia. Efekty w `styles.css`:
 
 | Klasa / efekt | Rola |
 |---|---|
@@ -570,6 +640,20 @@ Efekty w `styles.css`:
 
 Nakładki są `fixed inset-0`, czyli pokrywają dokładnie widoczny obszar i nie powiększają dokumentu
 — żadnych pasków przewijania. Migotanie respektuje `prefers-reduced-motion`.
+
+**Dwa ekrany czekania, ta sama forma:** czarne tło i godło aplikacji. Gracz ma je rozpoznać jako
+ten sam rodzaj przerwy, nie czytając.
+
+- **Ekran startowy** (`index.html`) — od pierwszego malowania do zdjęcia po pobraniu sesji.
+  Ostylowany **w `<style>` w nagłówku, a nie klasami Tailwinda**: arkusz aplikacji przychodzi
+  dopiero po pierwszym malowaniu, więc przez te kilkaset milisekund splash byłby inaczej czarnym
+  tekstem na białym tle. Tło jest nieprzezroczyste i stoi ponad nakładkami kineskopu (`z-index`
+  70) — inaczej aplikacja renderuje się widocznie pod nim i gracz ogląda, jak się składa.
+- **Zasłona panelu lobby** (`LobbyTransition`) — na czas przeskoku licznika, patrz §4.8.
+
+Godło jest jednym komponentem (`layout/emblem.ts`) używanym przez nawigację, podgląd mapy i zasłonę
+panelu. Kopia w `index.html` jest jedyną, która musi zostać osobno: ekran startowy działa, zanim
+Angular w ogóle wstanie.
 
 **Dostępność:** nagłówki `sr-only` na widokach, `role="timer"` z etykietą na licznikach,
 `role="alert"` na komunikacie o nieudanym dołączeniu, `aria-hidden` na dekoracjach, etykiety
@@ -629,6 +713,7 @@ match_participants
   slot              INTEGER    1..254; unikalny w obrębie meczu
   nickname          TEXT       KOPIA z chwili startu
   color_*           INTEGER    kopia jak wyżej
+  left_at           TEXT?      jawne opuszczenie meczu; null, dopóki gracz w nim jest
 ```
 
 **Lobby nie ma tabeli, mecz ma.** Lobby jest jedno, żyje kilkadziesiąt sekund i zmienia się przy
@@ -663,19 +748,39 @@ interpolację w logach jako błąd). W dev włączone logowanie komend EF Core.
 
 ### 4.15 Serwer gry: wejście do meczu
 
-Osobny proces w C++ (`gameserver/`), jeden na mecz (D7). Etapy E1–E2 z
-[plan-serwera-gry.md](plan-serwera-gry.md): **transport i tożsamość działają, świata nie ma**.
-Proces przyjmuje graczy i wysyła im puste snapshoty z numerem tiku.
+Osobny proces w C++ (`gameserver/`), jeden na mecz (D7). Etapy E1–E2 i E3a z
+[plan-serwera-gry.md](plan-serwera-gry.md): **transport, tożsamość i mapa działają, symulacji nie
+ma**. Proces przyjmuje graczy, wysyła im teren i tyka pustymi snapshotami.
 
 ```
-gameserver --match-id <guid> --port 5101 --ticket-key <plik.pub> [--max-ticks N]
+gameserver --match-id <guid> --port 5101 --map <plik.tmap> --ticket-key <plik.pub>
+           [--seed N] [--max-actors 1-254] [--manifest -|plik] [--max-ticks N]
 
-① nasłuch      ws://127.0.0.1:{port}/match/{matchId}      NIE na 0.0.0.0 (D9)
-② upgrade      ścieżka musi wskazywać mecz tego procesu, inaczej 404 przed negocjacją
-③ ClientHello  weryfikacja biletu OFFLINE: podpis → exp → matchId → slot → nonce
-④ pętla        zegar 10 Hz, snapshot co drugi tik (D3), ten sam bufor dla wszystkich
-⑤ koniec       ramka zamknięcia 1001, proces wraca z kodem 0
+① start        klucz, teren i roster PRZED nasłuchem — cokolwiek jest nie tak, ma zatrzymać
+               proces, zanim meta uzna mecz za żywy
+② nasłuch      ws://127.0.0.1:{port}/ws/match/{matchId}   NIE na 0.0.0.0 (D9)
+③ upgrade      ścieżka musi wskazywać mecz tego procesu, inaczej 404 przed negocjacją
+④ ClientHello  weryfikacja biletu OFFLINE: podpis → exp → matchId → slot → nonce
+⑤ powitanie    MatchInit (mapa, wymiary, sha256, slot, ziarno, obsada) → Snapshot z keyframe'em
+⑥ pętla        zegar 10 Hz, snapshot co drugi tik (D3), ranking co piąty snapshot
+⑦ koniec       ramka zamknięcia 1001; kod wyjścia mówi, czy to porzucenie, czy normalny koniec
 ```
+
+**Mapa jedzie do gracza w dwóch wiadomościach i w tej kolejności.** `MatchInit` niesie opis —
+identyfikator mapy, wymiary, `mapSha256`, przydzielony slot, ziarno i całą obsadę meczu — a zaraz
+po nim leci `Snapshot` z `is_keyframe = true` i pełną tablicą właścicieli w postaci runów RLE.
+Kolejność jest częścią kontraktu: klient buduje z `MatchInit` tablicę i paletę, a dopiero potem ma
+czym je wypełnić.
+
+Keyframe **pomija pustkowia** — klient zeruje `owner[]` i nakłada na to runy, więc kafelki niczyje
+opisuje sama ich nieobecność, a `start_delta` jest długością przerwy. Woda jedzie, mimo że klient
+ma ją też w terenie: dzięki temu keyframe opisuje `owner[]` w całości i nie trzeba łączyć dwóch
+źródeł, żeby wiedzieć, czyj jest kafelek. Na mapie 2000×1000 w 44% pokrytej wodą to **5192 runy
+w 50 KB**.
+
+**`mapSha256` liczy proces, nie meta** (D13) — z faktycznie wczytanych bajtów. Wartość przepisana
+z bazy poświadczałaby to, co meta *myśli* o pliku; policzona z pliku poświadcza teren, na którym
+mecz naprawdę się toczy. To jest pole, po którym klient rozpozna, że ma w cache'u inną mapę.
 
 **Bilet weryfikowany jest bez kontaktu z meta.** Klucz publiczny wczytywany jest raz, przy starcie,
 i proces nie odpytuje sieci ani razu — restart ASP.NET nie ma prawa zerwać trwających meczów (§4.3
@@ -690,11 +795,943 @@ próbującemu, jak blisko celu jest.
 | `Ping` odsyłany jako `Pong` z niezmienionym znacznikiem | RTT liczy klient, bo przeglądarka nie daje JavaScriptowi dostępu do natywnych ramek ping/pong |
 | Wykrywanie martwych połączeń | ramki ping Beasta, `idle_timeout` 30 s — przeglądarka odpowiada automatycznie, więc nic nie trzeba dokładać |
 
-**Czego proces jeszcze nie robi:** nie wczytuje terenu, nie wysyła `MatchInit` ani keyframe'a, nie
-przyjmuje komend i nie gasi się sam po odejściu ostatniego gracza. To etap E3.
+**Czego proces jeszcze nie robi:** nie odsyła wyniku meczu do meta (luka nr 4) i nie prowadzi
+botów — te rosną i bronią się według wspólnych reguł, ale same nie atakują, więc dziś są wyłączone
+(§4.20). Komendy, ekonomia, miasta i podbój działają.
 
 Klient testowy — `npm --prefix client run match` (§8.1) — używa tego samego codegenu protobuf co
-aplikacja, więc sprawdza schemat także od strony TypeScriptu.
+aplikacja, więc sprawdza schemat także od strony TypeScriptu. Rozpisuje keyframe: liczbę runów,
+objęte nimi kafelki i to, czy mieszczą się w wymiarach mapy — błąd o jeden w `start_delta` wygląda
+inaczej niż awaria, bo daje przesunięty kontynent.
+
+---
+
+### 4.16 Mapa: format `.tmap` i konwerter `tmapgen`
+
+Źródłem mapy jest **para plików**, a `.tmap` jest wynikiem konwersji i nie wchodzi do repozytorium:
+
+```
+maps/moon.png     siatka terenu, 1 piksel = 1 kafelek, dokładnie 4 kolory   ← źródło
+maps/moon.json    { "id", "name", "maxActors", "spawns": [[x, y], …] }      ← źródło
+maps/moon.tmap    2 MB, robi go tmapgen                                     ← artefakt
+```
+
+Siatka jest obrazkiem, bo to dwa miliony wartości: w JSON-ie zajęłyby ponad 4 MB tekstu, a PNG waży
+kilkadziesiąt kilobajtów, otwiera się w każdym edytorze i **widać na nim, co się rysuje**.
+
+| Kod | Teren | Kolor w źródle |
+|---|---|---|
+| 0 | woda | `#0000FF` — w `owner[]` ląduje jako 255 (D12) |
+| 1 | niziny | `#00FF00` |
+| 2 | wyżyny | `#FFFF00` |
+| 3 | góry | `#808080` |
+
+Kolory są czyste i skrajne, bo dobrane pod **precyzję rysowania**, nie pod wygląd — w każdym
+edytorze trafia się w nie bez pipety, a paleta wyświetlania jest osobną sprawą klienta.
+
+**Punkty startowe są stałe i należą do mapy.** Indeks spawnu jest indeksem slotu: kto stoi na
+slocie 7, zaczyna na siódmym punkcie z pliku. Nie ma losowania, więc nie ma czego odtwarzać
+w replayu (D10), a balans jest własnością pliku, nie kodu.
+
+Konwersja **sprawdza, a nie tylko przepisuje**. Każda z tych reguł opisuje mapę, która wczytuje się
+bez problemu i psuje mecz w dwunastej minucie — a wygląda wtedy jak błąd symulacji:
+
+| Sprawdzenie | Co bez niego przechodzi |
+|---|---|
+| Nieznany kolor piksela | literówka w odcieniu zamieniona w teren, a nie zgłoszona |
+| Ląd poza przedziałem 40–60% | mecz bez linii brzegowej albo sto wysepek bez sąsiadów |
+| Spawn na wodzie albo poza głównym kontynentem | gracz, którego nikt nie zaatakuje i który sam nigdzie nie wyjdzie |
+| Mniej spawnów niż `maxActors` | boty startują tak samo jak ludzie, więc część nie miałaby gdzie stanąć |
+
+PNG czyta **własny czytnik na zlib**, przyjmujący wyłącznie 8-bitowy RGB/RGBA bez przeplotu.
+Biblioteka ogólnego przeznaczenia zrobiłaby dokładnie to, czego tu nie chcemy: sprowadziłaby
+16 bitów na kanał do 8 i rozwinęła paletę — cicho. Sumy kontrolne bloków są sprawdzane, więc plik
+urwany przy kopiowaniu wychodzi przy konwersji, a nie jako dziura w terenie.
+
+Do czasu, aż powstanie pierwsza narysowana mapa, ten sam program w trybie `--synthetic` generuje
+teren z ziarna. **Nie udaje mapy do grania** — ma dać keyframe o realistycznym rozmiarze. Cała
+arytmetyka jest całkowitoliczbowa, żeby to samo ziarno dawało bajt w bajt ten sam plik na obu
+platformach: mapy są adresowane sumą kontrolną (D13), więc dwie maszyny generujące „tę samą" mapę
+odrobinę inaczej serwowałyby dwa różne assety.
+
+Format pliku, little-endian, teren na końcu i pod offsetem wpisanym w nagłówek — dzięki temu
+przeglądarka robi `new Uint8Array(buf, offset)` i nie musi wiedzieć o sekcjach, których nie czyta:
+
+```
+ 0   4  "TMAP"          10  1  liczba typów terenu     16  4  offset terenu
+ 4   2  wersja formatu  11  1  długość identyfikatora  20  …  identyfikator (ASCII)
+ 6   2  szerokość       12  2  liczba spawnów              …  spawny, po 2 × u16
+ 8   2  wysokość        14  2  rezerwa              offset: width × height bajtów
+```
+
+Nagłówek czyta i zapisuje **jedna jednostka kodu** (`src/map/tmap.cpp`), wspólna dla serwera
+i konwertera: format z dwiema niezależnymi implementacjami rozjeżdża się przy pierwszej zmianie
+i wychodzi to dopiero na produkcji.
+
+---
+
+### 4.17 Obsada meczu i cykl życia procesu
+
+**Roster przychodzi manifestem na standardowe wejście**, a nie argumentami i nie plikiem: nicki
+graczy w argumentach trafiłyby do listy procesów całej maszyny, a plik trzeba by sprzątać.
+Orkiestrator manifest wyłącznie przekazuje — nie rozumie go i nie przechowuje.
+
+```json
+{ "players": [ { "slot": 7, "name": "Ala", "colorRgb": 16711680 } ] }
+```
+
+Wariant „proces dopytuje meta przy starcie" odpadł, bo wprowadzałby zależność od meta w ścieżce
+startu meczu — a §4.3 dokumentu architektury zabrania tego wprost: restart ASP.NET nie ma prawa
+zerwać trwających meczów. **Konwersję koloru z HSV na RGB robi meta**, żeby proces w C++ nigdy nie
+dowiedział się o istnieniu tamtej przestrzeni.
+
+Manifest jest walidowany, mimo że pisze go meta: slot poza `1..maxActors`, ten sam slot dwa razy,
+pusty albo przesadnie długi nick i kolor spoza RGB są odrzucane. Slot zero to pustkowie, a 255 to
+woda (D12) — jedno i drugie w rosterze znaczyłoby aktora, którego kafelki są nie do odróżnienia od
+terenu. Pusty manifest jest **legalny** i znaczy „mecz bez ludzi": tak wygląda przebieg ręczny.
+
+**Botów w manifeście nie ma i nie będzie.** Nie mają wiersza w bazie i nie muszą go mieć: proces
+dopełnia nimi wolne sloty do sufitu aktorów, a ich nicki i kolory wynikają z ziarna meczu. To nie
+oszczędność, tylko warunek z §8 dokumentu architektury — replay odtwarza mecz przez re-symulację,
+więc wszystko, co dotyczy botów, musi wynikać z ziarna.
+
+Dwie decyzje w tej generacji wyglądają na drobiazgi, a nie są:
+
+- **Nick i kolor zależą od slotu, nie od kolejności losowania.** Każdy slot ma własny strumień PCG,
+  więc dopisanie jednego człowieka do rostera nie przemalowuje pozostałych botów — a gdyby
+  przemalowywało, replay sprzed zmiany przestałby się zgadzać.
+- **Nicki i odcienie idą z permutacji przestrzeni 256 wartości**, a nie z niezależnych losowań.
+  Przy 253 botach kolizja przy losowaniu niezależnym jest pewnością, nie ryzykiem.
+
+Generator to własny PCG32 (`src/sim/rng.cpp`) — **jedyne źródło losowości w procesie**. Nie
+`std::mt19937` z rozkładami ze standardu: te nie mają zdefiniowanej implementacji, więc ten sam kod
+dałby na dwóch bibliotekach dwa różne mecze.
+
+> **Znana luka:** boty dostają odcienie rozrzucone po całym kole barw, ale **nie omijają kolorów
+> wybranych przez ludzi** — bot może wylądować w kolorze łudząco podobnym do gracza. Ominięcie
+> wymagałoby liczenia odcienia z RGB człowieka, czyli tej samej konwersji, którą trzymamy po stronie
+> meta. Do rozstrzygnięcia razem z paletą wyświetlania w etapie E5, gdy w ogóle będzie to widać.
+
+**Proces gasi się sam.** Bez tego pierwszy dzień z prawdziwym alokatorem zostawia na maszynie proces
+na każde lobby, a lobby otwiera się co kilka minut w nieskończoność.
+
+| Warunek | Reakcja | Kod wyjścia |
+|---|---|---|
+| Nikt nie połączył się przez 120 s od startu | koniec procesu | ≠ 0 — to awaria alokacji, nie mecz |
+| Ostatni gracz rozłączony 120 s temu | koniec procesu | 0; tyle trwa okno reconnectu (D14), a powrót **zeruje** odliczanie |
+| Twardy limit 30 minut | koniec procesu niezależnie od liczby graczy | 0 |
+
+Oba okna 120-sekundowe skraca `--idle-seconds` i to jest **narzędzie dev, nie strojenie**: pula
+portów na maszynie deweloperskiej jest mała, więc dwie minuty czekania na powrót gracza to dwie
+minuty, przez które port skończonego meczu do niej nie wraca (§4.18). Twardego limitu ta opcja nie
+dotyka — obietnicy z D7 nie da się skrócić przez przypadek.
+
+Ostatni warunek nie jest ostrożnością: D7 obiecuje mecze poniżej 25 minut i na tej obietnicy stoi
+cała strategia deployu („przestań alokować i poczekaj"). Obietnica bez egzekwowania jest tylko
+komentarzem.
+
+Cykl życia liczy **w tikach, nie w sekundach z zegara**. Tik jest już związany z czasem rzeczywistym
+przez zegar meczu, więc drugie źródło czasu wnosiłoby wyłącznie możliwość rozjechania się
+z pierwszym — a przy okazji cała ta logika daje się przetestować bez czekania i bez timerów.
+
+### 4.18 Alokacja: meta stawia proces meczu
+
+`LocalProcessMatchAllocator` (Infrastructure) to deweloperska wersja tego, co na produkcji zrobi
+agent na maszynie. Wybór maszyny znika, bo maszyna jest jedna; reszta kontraktu zostaje ta sama —
+alokacja albo oddaje adres **działającego** procesu, albo rzuca.
+
+```
+① sprawdzenie   binarka, plik .tmap dla mapy, klucz publiczny biletów, wolny port
+② start         gameserver --match-id --port --map --seed --max-actors --ticket-key --manifest -
+③ manifest      roster na stdin procesu, potem ZAMKNIĘCIE wejścia
+④ gotowość      próba połączenia TCP co 50 ms, aż się uda albo minie timeout
+⑤ wynik         MatchAllocation(127.0.0.1, port, wss://…/ws/match/{matchId})
+```
+
+**Roster jedzie stdinem, nie argumentami** (§3.5 planu serwera gry): nicki graczy w wierszu poleceń
+trafiłyby do listy procesów całej maszyny, a plik trzeba by sprzątać. `MatchAllocationRequest`
+dostał pole `Manifest`, które dla orkiestratora jest **nieprzezroczyste** — przepisuje je i nigdy do
+niego nie zagląda. Zamknięcie stdin jest częścią kontraktu, nie sprzątaniem: proces czyta wejście do
+końca strumienia i bez tego stanąłby na zawsze, zanim otworzy gniazdo.
+
+**Konwersja HSV → RGB stoi po stronie meta** (`HsvColorConversion` w warstwie aplikacji). Domena
+trzyma HSV, bo w tej przestrzeni kolor się wybiera; protokół meczu chce gotowego `colorRgb`.
+Gdyby przeliczał go C++, proces musiałby wiedzieć o istnieniu przestrzeni, której nigdy nie zobaczy.
+Arytmetyka jest całkowita — nie dla wydajności, tylko po to, żeby ten sam kolor dawał ten sam bajt
+niezależnie od maszyny.
+
+**Gotowość sprawdza sonda TCP, a nie „proces wstał".** Między `Process.Start` a pierwszym `accept`
+mija realny czas — proces wczytuje 2 MB terenu i liczy jego sumę kontrolną — a bilety wychodzą
+natychmiast po powrocie z alokacji. Sonda otwiera i zamyka połączenie; proces meczu przyjmuje je,
+czeka na żądanie HTTP, dostaje koniec strumienia i cicho kończy sesję.
+
+**Port pochodzi z puli** — `Match:GameServerPort` plus `Match:GameServerPortCount` kolejnych.
+Alokator bierze pierwszy, na którym nikt nie nasłuchuje, a numer wpisu w puli trafia do adresu
+WebSocketa jako segment `gs{N}`, bo po tym routuje proxy dev-servera (§7.2). Wolny port wybierany
+jest **przed** startem procesu: gdyby stał na nim proces innego meczu, sonda gotowości
+zameldowałaby sukces w pierwszej próbie, a gracze trafiliby do meczu, którego ich bilety nie
+dotyczą.
+
+Rezerwacja nie potrzebuje zamka: alokacje idą po kolei (jedna korutyna launchera), a alokator
+wraca dopiero wtedy, gdy proces już nasłuchuje — więc następne wywołanie widzi jego port zajęty.
+
+**Proces jest świadomie osierocany.** Gasi się sam (§4.17), więc meta nie musi go pilnować —
+a restart meta nie ma prawa zerwać trwającego meczu. Wyjście procesu **nie jest przechwytywane**:
+w dev logi meczu mają lecieć do tej samej konsoli co logi meta, a przechwycony i nieczytany potok
+zapycha się po kilkudziesięciu kilobajtach i zawiesza proces w połowie meczu.
+
+| Awaria | Zachowanie |
+|---|---|
+| Brak binarki, mapy albo klucza | alokacja rzuca z nazwą brakującego pliku; po 3 próbach `MatchStartFailed` i nowe lobby |
+| Cała pula zajęta | to samo, z komunikatem wskazującym zakres portów i trwające na nich mecze |
+| Proces padł przed nasłuchem | alokacja rzuca z jego kodem wyjścia; powód proces wypisał sam |
+| Proces nie zdążył w oknie gotowości | `TimeoutException`, proces ubijany razem z drzewem potomnym |
+
+Atrapa (`FakeMatchAllocator`) nie znika i przełącza się ją konfiguracją — `Match:Allocator` ma
+wartość `Fake` albo `LocalProcess` (§7.1). Wybór jest konfiguracją, a nie środowiskiem, bo brak
+zbudowanej binarki C++ nie ma zamieniać dev-a w serwis, w którym każde lobby kończy się awarią.
+
+> **Dlaczego pula, a nie jeden port.** Przy jednym porcie na maszynie stał jeden mecz naraz — i nie
+> było to okno przejściowe, tylko czas trwania całej tamtej rozgrywki. Gracz, który wyszedł
+> z meczu i wrócił do kolejki, **nie mógł zacząć następnego, dopóki grali w tamtym pozostali**:
+> alokacja odbijała się od zajętego portu, a każde lobby otwarte w tym czasie kończyło się
+> komunikatem o awarii. Czekanie na port (niżej) leczyło wyłącznie przypadek, w którym poprzedni
+> mecz już się skończył — tu nie miało na co czekać.
+
+**Zajęty port to stan przejściowy, nie awaria — i alokator na niego czeka.** Gdy zajęta jest cała
+pula, proces, który właśnie gaśnie, dożywa swojego okna bezczynności i zwalnia gniazdo sam, więc
+odmowa w tej chwili zamieniałaby normalny stan w nieudany start. Czekanie jest ograniczone
+(`Match:PortWaitMilliseconds`, domyślnie 30 s), bo po drugiej stronie stoi zamrożony roster —
+przy puli zajętej naprawdę lepiej szybko przyznać się do porażki.
+
+Skraca to okno `Match:MatchIdleSeconds`, przekazywane procesowi jako `--idle-seconds` (§4.17):
+w dev ze 120 s do 20 s, więc port po skończonym meczu wraca do puli szybciej. **Wyłącznie w dev** —
+na produkcji zostaje 120 s, bo tyle trwa okno reconnectu obiecane graczowi, a porty i tak
+przydziela agent z własnej puli.
+
+### 4.19 Klient: mapa na ekranie
+
+Widok meczu **nie renderuje mapy i nigdy nie widzi jej danych**. Oddaje kanwę workerowi przez
+`transferControlToOffscreen()` i od tej chwili dwanaście megabajtów tablic typowanych żyje
+wyłącznie tam; do Angulara wraca kilkaset bajtów stanu paska.
+
+```
+features/match/
+├── net/game-socket.worker.ts   gniazdo, protobuf, teren, owner[], pętla rysowania   ⟵ WORKER
+├── net/worker-protocol.ts      kontrakt wiadomości w obie strony
+├── map/tmap.ts                 czytnik nagłówka .tmap i suma kontrolna
+├── render/map-renderer.ts      ImageData 2000×1000 → kanwa mapy → drawImage z kamerą
+├── render/camera.ts            przesuwanie, zoom, przeliczenie ekran↔kafelek
+├── render/palette.ts           właściciel × teren → wypełnienie i otoczka
+├── render/territories.ts       gdzie stoi podpis państwa i jaki kadr je obejmuje
+└── match.ts                    wyłącznie sygnały dla UI
+```
+
+**Rysowanie jest dwustopniowe** i to jest cała jego architektura. Bitmapa całej mapy powstaje raz
+po keyframie (`putImageData`), a każda klatka to `drawImage` wycinka na widoczną kanwę — czyli
+operacja, którą robi GPU. Malowanie kafelek po kafelku przy każdej klatce dawałoby dwa miliony
+operacji sześćdziesiąt razy na sekundę i po prostu nie byłoby wykonalne.
+
+**Paleta jest policzona raz** — 256 właścicieli × 4 typy terenu — więc w pętli zostaje jedno
+indeksowanie. Kolor kafelka to kolor właściciela przemnożony przez jasność terenu (niziny 1,0 /
+wyżyny 0,85 / góry 0,7); bez tego przejęte kafelki stają się płaską plamą i po kilku minutach nie
+widać, którędy opłaca się rozszerzać. Bufor pikseli wypełniany jest 32 bitami naraz, a **kolejność
+bajtów sprawdzana w czasie wykonania**, nie zakładana: pomylona daje mapę z zamienionymi kanałami
+czerwonym i niebieskim, czyli obraz, który wygląda na działający.
+
+**Dwie pętle są rozdzielone** (§4.1 dokumentu architektury) i konsekwencja jest poprawnościowa,
+nie wydajnościowa. Sieć chodzi w workerze własnym rytmem, rysowanie napędza `requestAnimationFrame`
+z wątku głównego — w workerze ta funkcja nie istnieje. W karcie w tle przeglądarka dławi klatki
+praktycznie do zera, ale worker i gniazdo działają dalej, więc stan przychodzi na bieżąco, a obraz
+wraca przy pierwszej klatce po powrocie. Rysujemy tylko po zmianie stanu albo kamery, więc seria
+zdarzeń wskaźnika w jednej klatce daje jedno rysowanie.
+
+**Teren pobierany jest dopiero po `MatchInit`**, bo dopiero wtedy znana jest jego suma kontrolna —
+a ta jest częścią adresu (§5.1). Pobrane bajty są hashowane i **porównywane z `mapSha256`
+z protokołu**; to jedyny powód, dla którego to pole istnieje (D13). Po reconnekcie teren zostaje
+w pamięci workera i sieć nie jest ruszana.
+
+**Reconnect jest funkcjonalnością, nie dodatkiem.** Zerwane połączenie worker ponawia sam po
+sekundzie; odrzucony bilet (close 1008) prosi wątek główny o świeży, bo tylko on ma dostęp do HTTP
+i do tożsamości gracza — tą samą ścieżką `ensureTicket`, którą guard wpuszcza gracza po odświeżeniu
+strony. Mapa nie jest wtedy pobierana ponownie: przychodzi nowy keyframe i nakłada się na ten sam
+teren.
+
+Przeglądarka bez `OffscreenCanvas` dostaje **komunikat zamiast cichego czarnego ekranu**, a wyjątek
+w składaniu renderera zamienia się w widoczny błąd — czarny prostokąt z paskiem mówiącym „live"
+byłby awarią, której gracz nie umie ani zrozumieć, ani obejść.
+
+**Cały interfejs meczu siedzi w jednym panelu na dole** i ma trzy rzędy w kolejności, w jakiej
+gracz na nie patrzy: **stan** (przyrost, pasek zapełnienia puli, armia w polu, złoto), **decyzja**
+(ile procent wysłać) i **rozkazy**. Panel jest wyśrodkowany, ograniczony do `max-w-2xl` i jako
+jedyna część nakładki przyjmuje kliknięcia. Zasoby zeszły tu z górnego paska, bo pytanie „ile mam
+ludzi" pada dokładnie w chwili, gdy ręka jest już na suwaku — rozdzielone na dwa końce ekranu
+zmuszały do przenoszenia wzroku w środku natarcia. Pula jest **paskiem, nie parą liczb**: „ile się
+jeszcze zmieści" to informacja przestrzenna. W rogach zostają ranking (tabela z kolumnami, bo
+kolumny porównuje się wzrokiem w pionie) i zegar meczu liczony z tiku, nie z zegara przeglądarki.
+
+**Nakładka meczu jako jedyna nie idzie za motywem `crt`.** Leży na kolorowej mapie, więc zielony
+fosfor na czerni albo znikałby na lądzie, albo wygrywał z nim o uwagę; ciemny granat z jednym
+niebieskim akcentem czyta się nad każdym terenem. Rząd rozkazów ma dziś **jeden przycisk, nie
+dziewięć jak w pierwowzorze**: silosów, portów i okrętów w symulacji nie ma, a puste gniazda
+obiecywałyby mechaniki, których nie da się wydać. Kształt gniazda jest już docelowy, więc kolejne
+rozkazy wejdą obok bez przemeblowania paska.
+
+**Suwak siły jest widoczny zawsze, a nie schowany w menu.** Jego wartość decyduje o każdym ataku,
+więc ukryty byłby ustawieniem, o którym gracz zapomina — a obok procentu stoi od razu przeliczona
+liczba ludzi, żeby nie trzeba było liczyć w pamięci. Domyślnie **20 %**, nie połowa: tyle wraca
+z samego przyrostu w kilkanaście sekund, więc pierwszy odruchowy klik jest zaczepką, a nie decyzją
+o losie państwa.
+
+**Nad złotem biegnie pasek podatku** — dokładnie tej szerokości co komórka ze złotem, bo opisuje
+tę jedną komórkę, a nie kolejną rzecz w rzędzie. Wypełnia się liniowo, bo jest zegarem:
+przyspieszające wypełnienie kłamałoby o tym, ile zostało czasu. Serwer przysyła czas **do** poboru,
+a pasek pokazuje czas **od** ostatniego — rosnący czyta się jako „zbiera się", malejący jako
+„kończy się czas", i tylko pierwsze jest prawdą o tej mechanice. Najechanie na komórkę mówi
+resztę: przyrost złota na sekundę, kwotę najbliższego poboru i to, skąd się bierze. Przyrost nie
+ma własnego miejsca w pasku i mieć nie musi — to liczba sprawdzana raz na kilka minut, a stała pod
+okiem konkurowałaby z pulą ludzi o uwagę.
+
+**Koniec meczu ma własny ekran, a nie pasek ostrzeżenia nad żywym interfejsem.** Gdy worker
+wyczerpie ponowienia (`link = closed`), nakładka rozgrywki znika w całości — suwak, rozkazy
+i „wczytywanie terenu..." nad martwą planszą obiecują interakcję, której nie ma, a gracz próbuje
+ich użyć, zanim zrozumie komunikat. Na wierzch wchodzi jeden przycisk, który zgłasza wyjście do
+meta, zapamiętuje mecz jako porzucony i wraca do kolejki. Treść zależy od tego, czy `MatchInit`
+w ogóle doszedł: „mecz się zakończył" znaczy zerwane połączenie w trakcie gry, „tego meczu już nie
+ma" — że gniazdo nie otworzyło się ani razu, czyli że gracz wrócił do linku po czasie.
+
+> **Ekran jest dziś siatką bezpieczeństwa, a nie normalną drogą.** Przyczynę — wiersz meczu
+> zostający na zawsze w stanie `Live` — zamyka `MatchReaper` (§4.21): meta dowiaduje się o końcu
+> procesu i przestaje wydawać bilety, więc gracz wracający pod stary link ląduje wprost w kolejce.
+> Ten ekran zostaje na wypadki, w których obserwacja zawiedzie: restart meta gubi uchwyty procesów,
+> a alokator produkcyjny procesów w ogóle nie stawia.
+
+**Przejęcie kafelka błyska i gaśnie.** Każda paczka delt trafia na listę gasnących: kafelek dostaje
+kolor docelowy rozjaśniony w stronę bieli, a błysk gaśnie kwadratowo przez **260 ms**. Bez tego
+front przeskakiwał skokowo co paczkę snapshotu i jedyną informacją o kierunku natarcia było
+porównanie dwóch nieruchomych obrazów. **Własne przejęcia świecą mocniej** (0,85 wobec 0,45): przy
+stu graczach mapa rusza się wszędzie naraz i bez tego rozróżnienia własne natarcie ginie w cudzym
+ruchu. Rozjaśnianie miesza **każdy z czterech bajtów piksela osobno**, więc nie powtarza decyzji
+o kolejności bajtów z palety — kanał alfa jest już pełny, a 255 zmieszane z bielą to nadal 255.
+
+Prostokąt `putImageData` jest **per paczka, nie globalny**: dwa natarcia na przeciwnych końcach
+mapy dają dwa małe obszary zamiast jednego obejmującego pół planszy, a przy 2000×1000 różnica to
+megabajty na klatkę. Pętla klatek pyta renderer, czy coś się jeszcze pali — bez tego animacja
+stawałaby w pół drogi na nieruchomej kamerze, bo rysowanie jest tam warunkowane zmianą stanu.
+
+**Terytorium jest półprzezroczyste, a jego granica nie.** Kafelek zajęty maluje się mieszanką
+koloru gracza z kolorem terenu (55 % gracza), więc góry i przesmyki widać pod państwem tak samo
+jak na pustkowiu — poprzednia wersja kładła czysty kolor właściciela i po kilku minutach połowa
+mapy była płaską plamą, na której nie dało się zaplanować kierunku natarcia. Rozpoznawalność
+koloru bierze na siebie **otoczka**: każdy własny kafelek stykający się z czymkolwiek innym —
+cudzym terytorium, pustkowiem, wodą albo krawędzią mapy — dostaje kolor gracza rozjaśniony
+o trzecią część drogi do bieli. Paleta ma z tego powodu **dwa piętra** i renderer wybiera piętro
+jednym dodawaniem, więc granice nie kosztują ani jednego rozgałęzienia więcej niż środek państwa.
+Delta przemalowuje przy okazji czterech sąsiadów przejętego kafelka, bo obrys zmienia się po obu
+stronach granicy, a prostokąt `putImageData` rośnie o jeden kafelek na każdą stronę.
+
+> **Krawędź mapy liczy się jako obcy sąsiad.** Bez tego państwo dochodzące do brzegu świata jest
+> obrysowane w trzech czwartych i wygląda na niedomalowane. Warunki brzegowe tego rachunku
+> siedzą w wydzielonej funkcji `isBorderTile` — pomyłka o jeden daje tu obrys wypisany wzdłuż
+> lewej krawędzi mapy, czyli coś, co wygląda na artefakt renderowania, a nie na błąd indeksu.
+
+**Państwa są podpisane na mapie**: nick, a pod nim żywa populacja w notacji k/m. Miejsce podpisu
+liczy jedno przejście po tablicy właścicieli (`territories.ts`), raz na trzy sekundy — kotwicą jest
+środek ciężkości, a gdy ten wypadnie poza państwo (podkowa, półksiężyc), środek najdłuższego
+poziomego ciągu własnych kafelków, który z definicji leży na własnym terenie. Wielkość pisma
+rośnie z **rozmiarem państwa**, nie z zoomem, i poniżej dziewięciu pikseli CSS podpis w ogóle się
+nie rysuje: przy stu graczach na oddalonym kadrze setka nicków zlałaby się w jedną plamę.
+Populacja przychodzi w `PublicState` — mecz nie ma mgły wojny (§1 planu), więc nie ma czego chować.
+
+**Atak wydaje się kliknięciem w mapę**, a cel wyznacza **worker**: to on ma kamerę i tablicę
+właścicieli, czyli obie rzeczy potrzebne, żeby z punktu ekranu zrobić numer slotu. Kliknięcie
+i przeciąganie zaczynają się identycznie, więc rozstrzyga dystans — powyżej sześciu pikseli ruchu
+wskaźnik przesuwa mapę, poniżej wydaje rozkaz. Bez tego progu każde przesunięcie widoku kończyłoby
+się przypadkowym atakiem. Kliknięcie w wodę albo we własne terytorium jest milczące: to chybienie,
+nie pomyłka warta komunikatu.
+
+**Kamera staje na terytorium gracza po pierwszym pełnym stanie mapy** — raz, licząc środek ciężkości
+własnych kafelków. Bez tego pierwszą czynnością w grze byłoby szukanie samego siebie na mapie
+2000×1000, na której startowe pięćdziesiąt dwa kafelki mają kilka pikseli. Jednorazowość jest tu
+istotna: keyframe przychodzi przy każdym powrocie do meczu, a szarpnięcie kamerą w trakcie
+rozgrywki byłoby gorsze niż jej brak.
+
+**Kamerze wolno wyjechać za mapę — o połowę kadru i nie dalej.** Widok twardo przycięty do mapy
+znaczył, że państwo przy krawędzi świata ogląda się przyklejone do brzegu ekranu, a rozkazy wydaje
+w pasie kilku pikseli. Zapas jest liczony **połową kadru**, bo to jedyna miara, która sama skaluje
+się z przybliżeniem i wprost odpowiada na pytanie, po co ten zapas istnieje: pozwala wyprowadzić
+dowolny punkt mapy, łącznie z jej rogiem, na środek ekranu — i ani piksela dalej, więc połowa
+kadru to zawsze wciąż mapa. Sufit „trzecia część mapy" zostaje jako drugie ograniczenie przy
+oddaleniu. Pierwsza wersja miała **wyłącznie** ten sufit i przy dużym przybliżeniu jedna trzecia
+mapy okazywała się wielokrotnością kadru: dało się odjechać na czarny ekran bez wskazówki, w którą
+stronę wracać. To, co jest poza mapą, ma własny kolor tła — czerń wyglądałaby na niedomalowaną
+klatkę.
+
+**Mapę przesuwa też WSAD i strzałki.** Wątek główny wysyła **stan klawiszy**, a nie kroki
+przesunięcia — inaczej płynność ruchu zależałaby od tego, jak szybko system powtarza wciśnięty
+klawisz. Sam ruch liczy worker przy każdej klatce z czasu, jaki od niej minął, z rozbiegiem
+i wybiegiem po jednej dziesiątej sekundy; po skosie tak samo szybko jak w pionie. Strzałki nad
+suwakiem siły zostają suwakowi (to jego natywne sterowanie), litery przesuwają mapę zawsze.
+Utrata fokusu okna puszcza wszystkie klawisze — `keyup` trafia do okna, które ma fokus, a nie do
+tego, które zaczęło ruch, więc bez tego kamera jechałaby w nieskończoność.
+
+**Wyśrodkowanie jest przyciskiem, i to nie jednym.** „Wyśrodkuj" w prawym rogu obejmuje kadrem
+całe własne państwo, a krzyżyk przy każdym wierszu rankingu robi to samo dla cudzego. Kadr
+dobiera się z prostokąta obejmującego terytorium, a nie ze środka ciężkości: obietnicą przycisku
+jest „zobaczysz **całe**", a te dwa punkty przy państwie w kształcie podkowy leżą gdzie indziej.
+Pomiar jest odświeżany przy kliknięciu, bo kadr rozjechany o trzy sekundy ekspansji nie obejmuje
+tego, co przycisk obiecuje.
+
+**Liczby ludzi są dzielone przez dziesięć i skracane do notacji k/m** (`core/format`). Symulacja
+liczy w jednostkach dziesięć razy drobniejszych niż interfejs — dzięki temu przyrost na tik jest
+liczbą całkowitą o sensownej rozdzielczości, a gracz nie ogląda wartości z zerem na końcu.
+Dzielenie jest **wyłącznie prezentacją**: rozkazy i wzory chodzą na wartościach z serwera. Notacja
+trzyma jedno miejsce po przecinku także wtedy, gdy wypada zero — „1.0k" i „1.4k" mają tę samą
+szerokość, więc licznik przy suficie nie drga w takt przyrostu.
+
+Diagnostyka — tik, RTT, identyfikator mapy, stan połączenia — zeszła na dół i jest wyszarzona.
+Bez niej nie da się zdiagnozować meczu, który „dziwnie chodzi", ale nie ma powodu, żeby
+konkurowała o uwagę z pulą ludzi.
+
+**Mecz zabiera cały ekran.** Nawigacja znika (§4.10), a razem z nią **nakładki kineskopu**: winieta
+gasi krawędzie do 85% czerni, a linie ramki dokładają 32% co trzeci piksel. Na tekście to klimat,
+na mapie terenu — utrata czytelności dokładnie tam, gdzie gracz podejmuje decyzje. Obie nakładki są
+`fixed`, więc kładły się na kanwie niezależnie od tego, co ta rysuje; wyłącza je brak klasy
+`crt-screen` na tej jednej trasie. Odstęp na nawigację też znika — inaczej zostawałby pasek czerni
+tam, gdzie ma być mapa.
+
+> **Trasa SPA i gniazdo nie mogą dzielić ścieżki.** Klient ma trasę `/match/{matchId}`, a gniazdo
+> stoi pod `/ws/match/{matchId}`. Dopóki adresy były te same, **odświeżenie strony w trakcie meczu**
+> wysyłało żądanie dokumentu HTML tam, gdzie stoi WebSocket, i aplikacja się nie ładowała. Nie jest
+> to specyfika dev-servera: wspólne wejście na 443 routuje po ścieżce (D9), więc ingress
+> produkcyjny zachowałby się tak samo.
+
+### 4.20 Symulacja: ludzie, złoto, miasta i podbój
+
+Krok symulacji chodzi 10 Hz i ma dwie fazy: **ekonomia**, potem **natarcia**. Obie są czystą
+arytmetyką na jednym wątku (D8) — nie ma tu ani jednego punktu zawieszenia korutyny, więc rozkaz
+gracza może wejść tylko między tikami i to jest cała synchronizacja.
+
+**Sufit ludzi** rośnie z terytorium i miast:
+
+```
+maxTroops  = 2 × (kafelki^0,6 × 1000 + 50 000) + miasta × 250 000
+przyrost/t = (10 + ludzie^0,73 / 4) × (1 − ludzie / maxTroops)
+```
+
+Wykładnik `0,6` daje terytorium **malejący zwrot**: dwa razy większe państwo ma półtora raza
+większy sufit, nie dwa — bez tego pierwszy gracz, który urośnie, wygrywa resztę meczu samym
+rozmiarem. Przyrost ma maksimum koło **42 %** zapełnienia i po tym punkcie zwalnia, więc trzymanie
+pełnej puli jest gorsze niż jej wydawanie. Sufit jest twardy: przyrost nigdy go nie przeskakuje.
+
+**Złoto** leci ryczałtem: 100 na tik dla człowieka, 50 dla bota (1000 i 500 na sekundę), plus
+**10 na tik za każde miasto** (100 na sekundę). To jedyne miejsce poza obroną, w którym symulacja
+odróżnia bota od człowieka — poza nimi reguły są wspólne (D12) i mają takie zostać.
+
+**Podatek** dokłada się do ryczałtu **co 300 tików, czyli co 30 sekund**: skarbiec bierze wtedy
+dziesiątą część populacji z paska, więc gracz z 376 tysiącami ludzi dostaje 37,6 tysiąca złota.
+Stawka jest podana od liczby, którą gracz **widzi**, a nie od jednostek symulacji — te są dziesięć
+razy drobniejsze (§4.19), i to jedyne miejsce w tym wzorze, które da się pomylić. Trzydzieści
+sekund ryczałtu to 30 000 złota, więc podatek wyrównuje się z nim przy 300 tysiącach ludzi
+i dopiero od tego progu zaczyna decydować o budżecie.
+
+> **Podatku nie płaci armia w polu.** Liczony jest wyłącznie z ludzi w puli, więc wysłanie
+> wszystkiego zeruje najbliższy pobór — i to jest cała pointa tej mechaniki. Do dziś natarcie
+> kosztowało tylko straty; teraz ludzie zostawieni w domu **zarabiają**, a wybór między kolejną
+> ofensywą a odłożeniem na miasto przestaje być oczywisty. Pobór na tiku zerowym jest pomijany:
+> zabrałby dziesiątą część puli startowej, zanim gracz zdążył cokolwiek zrobić, i wyglądałby na
+> karę za wejście do meczu.
+
+**Miasto** kosztuje `125 000 × 2^(miasta)` do sufitu 1 000 000, czyli od czwartego cena stoi; bez
+sufitu podwajanie wychodzi poza zakres złota w kilkunastu krokach. Podnosi sufit ludzi o 250 000
+i przychód złota o 100 na sekundę, więc pierwsze zwraca się w 1250 sekund, a każde następne wolniej
+— i o to chodzi, żeby nie dało się kupić zwycięstwa samą kumulacją. Miasta są **wyłącznie
+licznikiem**: nie stoją na mapie, więc nie da się ich zdobyć ani zniszczyć, a
+`BuildCityOrder.tile_index` jest z tego powodu ignorowany.
+
+**Aktor startuje z 52 kafelkami**, nie z jednym, i jest to **dysk o promieniu 4** — dokładnie ten
+kształt co w pierwowzorze (`euclDistFN(tile, 4, true)`). Środek dysku leży na **styku czterech
+kafelków**, nie w środku jednego, więc sylwetka jest parzysta: osiem pól w najszerszym miejscu,
+wiersze 4-6-8-8-8-8-6-4, ścięte rogi. To nie jest szczegół — wariant liczony od środka kafelka
+daje siedem pól i inny narożnik, a kształt startowy to pierwsza rzecz, którą gracz widzi.
+Kolejność dobierania idzie od środka na zewnątrz, żeby spawn przy brzegu tracił skraj dysku,
+a nie pola ze środka. Jeden kafelek znaczył
+front szeroki na cztery pola, a od szerokości frontu zależy tempo natarcia: pierwsze minuty meczu
+schodziły na rozlewaniu się przez przesmyk. Woda i cudze terytorium są pomijane, więc spawn przy
+brzegu dostaje mniej — przesuwanie punktu startowego w głąb lądu byłoby rozjazdem między mapą
+a tym, co mówi jej plik.
+
+**Natarcie** to osobny byt: wysłani ludzie **wychodzą z puli gracza**, nie przyrastają i nie bronią
+własnego terytorium. Bez tego atak byłby darmowy, a jedyną strategią byłoby atakowanie wszystkim,
+co się ma. Kolejność zdobywania kafelków wyznacza kopiec minimalny:
+
+```
+priorytet = (los[0..6] + 10) × (1 − 0,5 × właśni sąsiedzi + teren/2) + bieżący tik
+            teren: niziny 1,0 · wyżyny 1,5 · góry 2,0
+```
+
+Losowość rozmywa front, żeby nie przesuwał się prostą linią. Właśni sąsiedzi obniżają priorytet,
+więc natarcie **domyka kieszenie**, zamiast zostawiać dziury. Teren działa odwrotnie: góry czekają
+dłużej niż równiny. Bieżący tik na końcu pilnuje, żeby kafelki dołożone później nie wyprzedzały
+tych czekających od dawna.
+
+> **Remisy w kolejce rozstrzyga indeks kafelka i to nie jest kosmetyka.** Priorytet jest sumą
+> kilku wartości z małego zbioru, więc remisy są regułą. Kolejność elementów równych względem
+> komparatora nie jest w standardzie określona — bez rozstrzygnięcia dwie biblioteki zdejmowałyby
+> je inaczej i ten sam mecz rozszedłby się przy pierwszym remisie, unieważniając replay (D10).
+
+Rozliczenie jednego kafelka: obrońca traci swoich ludzi **rozłożonych równo na swoje kafelki**
+(tylu, ilu „stało" na utraconym polu), a atakujący wypadkową dwóch wzorów — 60 % od stosunku sił
+i 40 % od obsady kafelka. Sam stosunek sił ignoruje, ile obrońca faktycznie trzymał; sama obsada
+ignoruje przewagę liczebną. Powyżej **100 000 kafelków** dochodzą hamulce skali po obu stronach,
+żeby państwo, które raz urosło, nie było nie do ruszenia samą masą. Budżet kafelków na tik zależy
+od stosunku sił **i szerokości frontu** — ta sama armia rozlewa się szybciej po długiej granicy
+niż przez przesmyk — a mnożnik jest obcięty do `0,5` na kafelek granicy, więc nawet dziesięciokrotna
+przewaga nie zdobywa państwa w jednym tiku.
+
+> **Wzorcem jest OpenFront i źródłem prawdy jest jego kod, nie jego wiki.** Rozliczenie kafelka
+> odpowiada `attackLogic` z `src/core/configuration/Config.ts`, a pętla natarcia — `tick()`
+> z `src/core/execution/AttackExecution.ts`. Zgadza się wszystko: obrona terenu `80 / 100 / 120`,
+> prędkości `16,5 / 20 / 25`, koszt kafelka pustkowia (`teren / 5` dla człowieka, `/ 10` dla bota),
+> obcięcia `[0,6; 2]` i `[0,2; 1,5]`, sigmoidy wielkich państw, **mieszanka 60/40** ze stosunku sił
+> i obsady kafelka, budżet `front × 2` na pustkowiu i `clamp(…) × front × 3` przeciw graczowi,
+> zwłoka wycofania 20 tików i kara 25 %.
+>
+> **Wiki pierwowzoru myli się w co najmniej trzech miejscach** i nie wolno z niej poprawiać kodu:
+> podaje `0,8` zamiast `0,7` za obrońcę-bota, gubi pierwiastek w hamulcu wielkiego atakującego
+> (`sqrt(100 000 / kafelki)^0,7`, czyli efektywnie wykładnik `0,35`) i opisuje losowanie priorytetu
+> jako `[0,7]`, choć `nextInt(0, 7)` daje `[0,6]`. Wszystkie trzy mają test albo komentarz przy
+> stałej.
+>
+> Mechaniki pierwowzoru, których tu nie ma, do wzorów nie wchodzą: posterunki obrony, opad po
+> nukach, zdrajca, nacje z poziomami trudności, sojusze i drużyny, gracz nieobecny, aneksja przez
+> okrążenie i cała warstwa morska. Wszystkie byłyby mnożnikami równymi `1`, więc pominięcie
+> niczego nie psuje — ale człony, które przez to wyglądają na martwe (np. `max(prędkość, 10)`
+> w gałęzi pustkowia), są wierne oryginałowi i nie są błędem do posprzątania.
+>
+> **Kopiec podboju nie ma dedupu i to jest mechanika, nie szczegół implementacji.** Kafelek
+> wraca do niego po **każdym** zdobytym sąsiedzie, za każdym razem ze świeżym priorytetem —
+> a ten spada o połowę za każde własne pole dookoła, więc domknięta kieszeń wskakuje na początek
+> kolejki. Wstawianie „tylko raz" zamraża priorytet na chwili pierwszego odkrycia i front zostawia
+> za sobą dziury. To nie jest kwestia wyglądu: **budżet kafelków na tik jest proporcjonalny do
+> szerokości frontu**, a postrzępione natarcie ma przy tej samej powierzchni dwa razy dłuższy
+> obwód, więc dostaje dwa razy większy budżet i strzępi się jeszcze bardziej. Zmierzone na
+> 834 kafelkach: obwód **102** (koło idealne: 102,4) z ponownym wstawianiem i **247** bez niego,
+> przy czym wersja bez wstawiania zdobywała tę samą powierzchnię o **dwie sekundy szybciej**.
+> Pilnuje tego `WastelandFrontStaysCompactInsteadOfFraying`.
+>
+> Poza symulacją zostają jeszcze dwie różnice względem openfront.io: suwak wysyłki (u nas
+> domyślnie **50 %**, tam **20 %**) i to, że przy `Match:FillWithBots=false` jeden gracz ma pustą
+> mapę na wyłączność, więc front rośnie bez przeszkód.
+
+| Sytuacja | Zachowanie |
+|---|---|
+| Drugi rozkaz na ten sam cel | ludzie **dokładają się** do trwającej ofensywy; dwa fronty biłyby się o te same kafelki, a każdy liczyłby stosunek sił, jakby był jedyny |
+| Cel odpowiada natarciem na atakującego | armie **znoszą się** różnicą sił, zanim którakolwiek dojdzie do kafelków — inaczej mijałyby się na mapie i wygrywałby szybszy palec, nie silniejsza armia |
+| Rozkaz na cel bez wspólnej granicy | odrzucony (`NO_SHARED_BORDER`) i **nie kosztuje ani jednego człowieka** |
+| Wycofanie | podbój staje **natychmiast**, ale ludzie wracają dopiero po **20 tikach** (2 s) i wraca ich 75 %. Przez ten czas armia jest poza pulą: nie broni, nie przyrasta, nie da się jej zawrócić ani dosłać do niej posiłków, a wciąż może zginąć w starciu czołowym. Kara i zwłoka istnieją po to, żeby odwrót był decyzją, a nie odruchem przy każdej niekorzystnej wymianie |
+| Front się urwał albo cel zniknął | ocalali wracają **bez kary** — to nie jest decyzja gracza, tylko koniec roboty |
+| Ludzie natarcia spadli poniżej 1 | atak znika i **nie ma kogo oddać**; to jest cena przegranej ofensywy |
+| Obrońca stracił ostatni kafelek | wykreślony z meczu razem ze swoimi natarciami |
+
+> **Eliminacja następuje przy zerze kafelków, nie przy stu.** Pierwowzór wykreśla gracza poniżej
+> stu pól, ale tam rozgrywka zaczyna się od sporego terytorium — tutaj każdy aktor startuje na
+> **jednym** kafelku, więc ta sama reguła kasowałaby wszystkich przy pierwszym kontakcie.
+> Odpowiednikiem byłby ułamek mapy, a nie liczba bezwzględna; do czasu, gdy będzie potrzebny,
+> obowiązuje definicja naturalna.
+
+Ludzie startowi (`initial_troops`, 25 000) są **wartością do wyważenia, nie wzorem**: start z zera
+znaczyłby pierwszą minutę na przyroście rzędu dziesięciu ludzi na tik.
+
+> **Boty są dziś wyłączone** (`Match:FillWithBots`, w dev `false`). Nie podejmują żadnych decyzji,
+> więc mecz z dziewięćdziesięcioma dziewięcioma z nich jest meczem z dziewięćdziesięcioma
+> dziewięcioma nieruchomymi celami. Przełącznik, a nie usunięcie kodu — obsada i cały cykl życia
+> botów są napisane i przetestowane, brakuje wyłącznie logiki. Sufit aktorów zostaje nietknięty,
+> bo to on ogranicza zakres slotów w bilecie; z wyłączonymi botami lobby pokazuje **0**, żeby
+> nagłówek nie obiecywał przeciwników, których proces meczu nie postawi.
+
+**Losowość idzie z jednego strumienia PCG** zasianego ziarnem meczu, z dala od strumieni 1..254,
+którymi obsada losuje nicki botów. Kolejność losowań zależy od kolejności rozkazów — a ta jest
+dokładnie tym, co zapisuje log komend, więc ziarno plus log odtwarza mecz kafelek w kafelek (D10).
+Test `SameSeedAndOrdersGiveTheSameMap` pilnuje tego wprost.
+
+**Delty** niosą kafelki, które zmieniły właściciela od poprzedniej wysyłki: bez powtórzeń,
+posortowane, pogrupowane po nowym właścicielu, indeksy różnicami (pierwszy w grupie bezwzględnie).
+Lista należy do **okna wysyłki**, nie do tiku. `MyState` idzie osobno, per gracz, bo jego treść
+zależy od odbiorcy i łamałaby wspólny bufor broadcastu.
+
+> **Wysyłka idzie 10 Hz, nie 5 Hz — świadome odstępstwo od D3.** Klient animuje przejmowanie
+> kafelków z tego, co przyszło ostatnią paczką, więc wysyłka rzadsza niż symulacja zamienia
+> animację w zgadywanie: front docierał skokami po 200 ms. Cena jest realna i policzona — znika
+> naturalna deduplikacja (kafelek przejęty i odbity w jednym oknie jechał raz) i podwaja się
+> liczba ramek. Sam wolumen kafelków rośnie mniej niż dwukrotnie, bo zmian na tik jest tyle samo
+> — dzielą się tylko na więcej paczek. `PublicState` został przy 1 Hz (co dziesiąta wysyłka), bo
+> to lista stu graczy, a nie dane do animowania. Powrót to jedna wartość: `TickRates::send_every`.
+
+### 4.21 Koniec meczu: kto zamyka wiersz
+
+Proces meczu gaśnie sam (§3.7 planu serwera gry) i przez długi czas **nikt się o tym nie
+dowiadywał**. Wiersz zostawał `Live`, więc meta dalej wydawała do niego bilety, `matches/mine`
+wciągało gracza z powrotem na ekran meczu, a ten ekran mógł mu powiedzieć wyłącznie „tego meczu
+już nie ma".
+
+Domyka to łańcuch trzech elementów, każdy w swojej warstwie:
+
+| Element | Warstwa | Rola |
+|---|---|---|
+| `LocalProcessMatchAllocator` | Infrastructure | trzyma uchwyt procesu **wyłącznie po to**, żeby dostać `Exited`, i melduje wyjście do kanału |
+| `MatchEndChannel` | Application | przenosi notyfikację z wątku puli do warstwy, która ma bazę |
+| `MatchReaper` | Api | otwiera scope, ustawia `Completed`, zapisuje |
+
+**Uchwyt nie jest kontrolą nad procesem.** Nikt go stąd nie zabija i restart meta nadal niczego
+nie zrywa (§4.3 dokumentu architektury) — traci wyłącznie obserwację, dokładnie tak jak przed tą
+zmianą. Zdarzenie przychodzi z **wątku puli**, bez scope'a i bez kontekstu żądania, więc zapis do
+bazy z tego miejsca musiałby sam sobie robić scope, sam łapać wyjątki i sam decydować o anulowaniu
+hosta; kanał przenosi tę odpowiedzialność tam, gdzie już jest — dokładnie jak przy starcie meczu.
+
+**To nie jest odbiór wyniku** (plan alokacji, etap 4). `MarkCompleted` nie mówi, kto wygrał — mówi
+tylko, że procesu nie ma. Dlatego nie rzuca przy meczu w innym stanie: obserwacja bywa spóźniona
+i bywa powtórzona, a mecz zamknięty wcześniej odbiorem wyniku ma taki zostać. Wygrywa ten, kto
+zdąży pierwszy.
+
+**Czego to nie łapie:** meczów, których proces zgasł, gdy meta nie żyła — uchwyty giną razem
+z procesem meta. Dla nich zostaje `StaleMatchSweeper` i ekran końca meczu po stronie klienta
+(§4.19).
+
+### 4.22 Serwer gry: z czego zbudowany jest proces meczu
+
+Proces czyta się od `main` w dół i to jest cała jego architektura:
+
+```
+main.cpp              opcje → MatchSetup::open → wiring → co_spawn(run_match)   ~110 linii
+├── app/startup       mapa, świat, roster, keyframe, klucz biletów — jeden std::expected
+├── app/match_runner  korutyna meczu: nasłuch, sygnały, pętla tików, sprzątanie
+│   ├── state/publisher     jedno okno wysyłki: snapshot → MyState → clear_changed
+│   ├── sim/simulation      tik symulacji i rozkazy
+│   └── tick/match_lifetime kiedy zgasić proces
+└── net/session       jedno połączenie: upgrade → bilet → wejście → pętla wiadomości
+    ├── net/session_registry  lista żywych połączeń i rozsyłka
+    └── net/commands          rozkaz z protokołu → reguła gry → powód odmowy
+```
+
+#### Diagram klas — szkielet procesu
+
+Strzałka ciągła z rombem to **własność** (pole przez wartość), strzałka przerywana — **referencja
+albo wskaźnik**. Rozróżnienie jest tu całą treścią diagramu: w tym procesie prawie nic nie jest
+kopiowane, a niemal wszystko trzyma referencję do czegoś, co żyje dłużej.
+
+```mermaid
+classDiagram
+    direction LR
+
+    class Options {
+        <<struktura>>
+        +string match_id
+        +uint16 port
+        +string map_path
+        +int64 seed
+        +uint32 max_actors
+        +uint32 idle_seconds
+        +uint32 max_ticks
+    }
+
+    class MatchSetup {
+        <<struktura>>
+        +open(Options) expected~MatchSetup~
+    }
+
+    class MapFile {
+        +open(path) expected~MapFile~
+        +map() MapView
+        +sha256() span
+    }
+
+    class World {
+        +owner_at(tile) uint8
+        +terrain_at(tile) Terrain
+        +set_owner(tile, slot) void
+        +tiles_of(slot) uint32
+        +neighbors4(tile, out) uint32
+        +place_actor(slot) bool
+        +changed_tiles() span
+        +clear_changed() void
+    }
+
+    class Roster {
+        +build(players, max, seed, bots) Roster
+        +actors() span~Actor~
+        +humans() size_t
+        +bots() size_t
+    }
+
+    class MatchIntro {
+        +init_for(slot) shared_ptr~string~
+        +keyframe_at(tick) shared_ptr~string~
+        +run_count() int
+    }
+
+    class TicketVerifier {
+        +from_pem_file(path, match, max) expected~TicketVerifier~
+        +verify(token, now) expected~Ticket~
+        +match() string
+    }
+
+    class MatchServices {
+        <<struktura referencji>>
+    }
+
+    class MatchClock {
+        +next() awaitable~Tick~
+        +tick() uint32
+        +cancel() void
+    }
+
+    class MatchLifetime {
+        +observe(tick, connections) MatchOutcome
+    }
+
+    class MatchPublisher {
+        -uint32 sends_
+        +publish(tick) void
+    }
+
+    class SessionRegistry {
+        +add(session) void
+        +remove(session) void
+        +broadcast(frame) void
+        +send_each(build) void
+        +drop_previous_on(slot, keep) void
+        +close_all() void
+    }
+
+    class Session {
+        -uint8 slot_
+        -deque~frame~ queue_
+        +start() void
+        +send(frame) void
+        +stop() void
+        +close_gracefully() void
+        -run() awaitable
+        -accept_websocket() awaitable~bool~
+        -authenticate() awaitable~bool~
+        -join() void
+        -leave() void
+        -read_loop() awaitable
+        -write_loop() awaitable
+    }
+
+    class Simulation {
+        +tick(number) void
+        +order_attack(slot, target, pct) OrderResult
+        +order_city(slot) OrderResult
+        +order_retreat(slot, target) OrderResult
+        +player(slot) PlayerState
+        +tax_due(slot) uint64
+    }
+
+    class commands {
+        <<funkcje>>
+        +execute_command(command, simulation, slot) RejectReason
+    }
+
+    class snapshot {
+        <<funkcje>>
+        +build_snapshot(tick, public, actors, world, simulation) shared_ptr~string~
+        +build_my_state(simulation, world, slot) shared_ptr~string~
+    }
+
+    class listener {
+        <<funkcje>>
+        +listen_on_loopback(executor, port) acceptor
+        +accept_connections(acceptor, services) awaitable
+    }
+
+    class run_match {
+        <<korutyna>>
+    }
+
+    MatchSetup *-- MapFile
+    MatchSetup *-- World
+    MatchSetup *-- Roster
+    MatchSetup *-- MatchIntro
+    MatchSetup *-- TicketVerifier
+    World ..> MapFile : teren jako widok w bajty pliku
+
+    run_match ..> Options : kopia w ramce korutyny
+    run_match ..> MatchSetup
+    run_match ..> MatchServices
+    run_match ..> MatchClock
+    run_match *-- MatchLifetime
+    run_match *-- MatchPublisher
+    run_match ..> listener
+
+    MatchServices ..> TicketVerifier
+    MatchServices ..> SessionRegistry
+    MatchServices ..> MatchIntro
+    MatchServices ..> MatchClock
+    MatchServices ..> Simulation
+
+    MatchPublisher ..> SessionRegistry
+    MatchPublisher ..> World
+    MatchPublisher ..> Simulation
+    MatchPublisher ..> snapshot
+
+    SessionRegistry o-- "0..254" Session : shared_ptr
+    listener ..> Session : tworzy
+    Session ..> MatchServices
+    Session ..> MatchIntro : init + keyframe
+    Session ..> commands
+    commands ..> Simulation
+
+    Simulation ..> World
+```
+
+**Czego na tym diagramie nie ma i to jest celowe:** ani jednej strzałki z `sim/` do `net/`.
+Symulacja nie wie, że ktokolwiek ją o cokolwiek pyta po drucie — protokół zna wyłącznie
+`net/commands` w jedną stronę i `state/snapshot` w drugą. Dzięki temu replay (D10) może odtworzyć
+mecz bez linii kodu sieciowego.
+
+#### Diagram klas — symulacja
+
+```mermaid
+classDiagram
+    direction LR
+
+    class Simulation {
+        -PlayerState players_
+        -Attack attacks_
+        -Pcg32 rng_
+        -uint32 tick_
+        +tick(number) void
+        +order_attack(slot, target, pct) OrderResult
+        +order_city(slot) OrderResult
+        +order_retreat(slot, target) OrderResult
+        +attack_force(slot) double
+        +tax_due(slot) uint64
+        +ticks_to_tax() uint32
+        -grow() void
+        -collect_tax(tick) void
+        -run_attacks(tick) void
+        -advance(attack, tick) bool
+        -withdraw(attack) bool
+        -conquer(attack, tick) bool
+        -absorb_counterattacks(slot, target, troops) double
+        -give_back(attack, malus) void
+        -eliminate(slot) void
+    }
+
+    class PlayerState {
+        <<struktura>>
+        +double troops
+        +uint64 gold
+        +uint32 cities
+        +bool is_bot
+        +bool alive
+        +double last_gain
+    }
+
+    class Attack {
+        <<struktura>>
+        +uint8 attacker
+        +uint8 target
+        +double troops
+        +bool retreating
+        +uint32 retreat_countdown
+        +bool done
+        +set~uint32~ border
+        +ConquerQueue frontier
+    }
+
+    class ConquerTile {
+        <<struktura>>
+        +uint32 tile
+        +double priority
+    }
+
+    class Pcg32 {
+        +next() uint32
+        +below(bound) uint32
+    }
+
+    class attack_math {
+        <<funkcje>>
+        +touches(world, tile, slot) bool
+        +seed_front(world, attack, rng, tick) void
+        +extend_front(world, attack, rng, tile, tick) void
+        +conquer_priority(world, tile, attacker, roll, tick) double
+        +attack_step(sides, terrain) AttackStep
+        +attack_tiles_per_tick(att, def, vs_player, border) double
+        +terrain_cost(terrain) TerrainCost
+    }
+
+    class economy {
+        <<funkcje>>
+        +max_troops(tiles, cities) double
+        +troop_gain(troops, max) double
+        +gold_per_tick(cities, is_bot) uint64
+        +tax_amount(troops) uint64
+        +city_cost(cities) uint64
+    }
+
+    class World {
+        +owner_at(tile) uint8
+        +terrain_at(tile) Terrain
+        +set_owner(tile, slot) void
+        +neighbors4(tile, out) uint32
+    }
+
+    Simulation *-- "256" PlayerState
+    Simulation *-- "0..*" Attack
+    Simulation *-- Pcg32
+    Simulation ..> World : referencja
+    Simulation ..> economy
+    Simulation ..> attack_math
+    Attack o-- "0..*" ConquerTile : kopiec priorytetowy
+    attack_math ..> World
+    attack_math ..> Pcg32
+```
+
+**Podział przebiega dokładnie tam, gdzie przebiega pytanie.** `attack_math` (czyli `sim/attack`)
+odpowiada „którędy i jak szybko idzie natarcie" i nie dotyka ani puli ludzi, ani złota. `economy`
+(`sim/economy`) odpowiada „ile przybywa i ile kosztuje" i nie zna mapy. `Simulation` jest jedynym miejscem, które trzyma stan
+i wie o obu tych rzeczach naraz — i dlatego jest jedynym miejscem, w którym mecz może się
+rozjechać z replayem.
+
+**`main` nie ma prawa nic liczyć.** Poprzednia wersja miała 399 linii i robiła cztery różne rzeczy
+naraz: walidowała opcje, wczytywała mapę i obsadę (siedem bloków `if (!x) { cerr; return; }`),
+wypisywała banner do logu i prowadziła pętlę meczu. Każda z nich zmienia się z innego powodu,
+a wymieszane nie dawały się ani czytać, ani testować w kawałkach. Dziś są trzy kroki: opcje,
+zasoby, pętla.
+
+**`MatchSetup` jest jedną strukturą, bo te rzeczy nie są luźne.** Świat jest widokiem w bajty pliku
+mapy, keyframe zdjęciem świata **po** postawieniu aktorów, a roster decyduje, kto gdzie stanął.
+Kolejność pól jest kolejnością zależności i zarazem odwrotną kolejnością niszczenia — mapa musi
+przeżyć świat, bo trzyma jego teren. Wszystkie powody porażki wracają jednym `std::expected`:
+proces, który i tak nikogo nie wpuści, ma paść **przed** nasłuchem, bo wtedy meta zgłasza nieudaną
+alokację i otwiera nowe lobby, a nie mecz, który wygląda na żywy.
+
+**Okno wysyłki ma własną klasę**, bo to nie są „trzy linie w pętli", tylko trzy niezależne reguły:
+snapshot idzie do wszystkich jednym buforem, `MyState` osobno do każdego, a lista zmienionych
+kafelków kasuje się dopiero po wysyłce (D3). Wymieszane z odliczaniem końca meczu i logiem tętna
+czytały się jak jedna sprawa, którą nie są.
+
+**Sesja to cztery kroki, nie jedna korutyna na sto linii.** `accept_websocket` → `authenticate` →
+`join` → `leave`, każdy z własnym powodem, żeby się nie udać. Pytanie „gdzie tu jest sprawdzanie
+biletu" wymagało wcześniej przeczytania całej obsługi HTTP. Rejestr sesji i spis zależności
+(`MatchServices`) wyprowadzone są do własnych nagłówków — pętla meczu używa jednej metody rejestru
+i nie ma powodu oglądać przy tym obsługi WebSocketa.
+
+**Symulacja rozdziela stan od kształtu frontu.** `sim/attack` odpowiada na pytanie „którędy i jak
+szybko idzie natarcie" (priorytety kolejki, budowanie i rozszerzanie frontu, arytmetyka starcia),
+a `sim/simulation` na „kto ile ma i co go to kosztuje". Pierwsze nie dotyka puli ludzi ani złota,
+drugie nie zna kolejki priorytetowej. `advance` rozpadło się przy okazji na `withdraw` i `conquer`,
+bo poza jednym `if` te dwa tryby nie mają ze sobą nic wspólnego.
+
+> **Refaktor był bezzmianowy i to było sprawdzalne.** Kolejność losowań w podboju jest częścią
+> kontraktu replayu (D10), więc każde przeniesienie kodu, które by ją ruszyło, wywala test
+> `SameSeedAndOrdersGiveTheSameMap` — ten sam mecz musi wyjść kafelek w kafelek. Cały zestaw 156
+> testów przechodził po każdym kroku, a proces przeszedł dodatkowo przebieg na żywej mapie
+> (`--max-ticks`), bo testy nie widzą tego, co robi `main`.
 
 ---
 
@@ -751,7 +1788,7 @@ Wydaje wołającemu świeży bilet do meczu, w którym gra. Ciało żądania pus
 ```json
 {
   "ticket": "eyJ…",
-  "wsUrl": "wss://localhost:5001/match/019fb3…",
+  "wsUrl": "wss://localhost:5001/ws/match/019fb3…",
   "expiresAt": "2026-07-30T14:21:03.000Z"
 }
 ```
@@ -768,9 +1805,59 @@ dostępny dla każdego z tokenem gościa.
 
 `wsUrl` czytany jest **z meczu**, a nie składany na nowo z konfiguracji — patrz §4.9.
 
+#### `GET /api/matches/mine` — wymaga tokenu
+
+Mecz, w którym wołający gra w tej chwili — razem ze świeżym biletem. `404`, gdy nie gra w niczym,
+i jest to najczęstsza odpowiedź w całym systemie.
+
+```json
+{
+  "matchId": "019fba4f-cdcc-742a-b4fb-134e17abae16",
+  "ticket": "eyJhbGciOiJFUzI1NiIs…",
+  "wsUrl": "wss://localhost:5001/ws/match/019fba4f…",
+  "expiresAt": "2026-08-01T00:41:12.4521Z"
+}
+```
+
+Istnieje, bo **mecz jest stanem wyłącznym** (§4.10): bilet żyje wyłącznie w pamięci karty, więc bez
+tego pytania odświeżenie strony gdziekolwiek poza adresem meczu wyglądałoby jak wypisanie
+z rozgrywki. Bilet dokładany od razu, bo odpowiedź twierdząca zawsze kończy się wejściem do gry.
+
+Pytanie dotyczy **wołającego**, więc `404` nie ukrywa tu niczyich danych — w odróżnieniu od
+`POST /api/matches/{matchId}/ticket`, gdzie jest świadomą odmową rozróżniania przypadków.
+
+#### `POST /api/matches/{matchId}/leave` — wymaga tokenu
+
+Opuszcza mecz. `204` przy powodzeniu, `404` gdy takiego meczu nie ma, gracz w nim nie gra albo
+już z niego wyszedł — dla wołającego to jedna odpowiedź, bo w każdym z tych przypadków nie ma go
+tam, gdzie właśnie próbuje przestać być.
+
+**Nieodwracalne.** Uczestnik dostaje `left_at` i przestaje być znajdowany: kolejny bilet nie
+zostanie wydany, a `GET /mine` przestaje ten mecz widzieć. Bez tego przycisk „opuść mecz" byłby
+wyłącznie schowaniem okna — gracz wróciłby do rozgrywki przy pierwszym odświeżeniu strony.
+
+Slot **nie** jest zwalniany i proces meczu nie jest o niczym informowany: jego aktor gra dalej,
+a terytorium nie znika dlatego, że ktoś zamknął kartę.
+
 #### `GET /api/health`
 
 Standardowy health check ASP.NET Core.
+
+#### `GET /maps/{mapId}/{sha256}/terrain.bin` — anonimowy, **tylko w dev**
+
+Plik `.tmap` mapy: nagłówek z wymiarami i punktami startowymi plus surowy teren. Poza `/api`,
+bo docelowo nie serwuje tego aplikacja, tylko CDN — a ścieżka ma zostać ta sama, żeby klient nie
+zauważył przeprowadzki.
+
+**Segment z sumą kontrolną jest ignorowany przy szukaniu pliku.** To świadome uproszczenie: w dev
+istnieje jeden plik na mapę, a hash w ścieżce pełni tam wyłącznie rolę klucza cache'a przeglądarki,
+dokładnie jak na produkcji. Nagłówki zostają te same (`public, max-age=31536000, immutable`), bo to
+one są testowane. `mapId` spoza zestawu liter, cyfr, `-` i `_` dostaje 404, zanim cokolwiek dotknie
+dysku.
+
+Klient dopasowuje ten plik do `mapSha256` z `MatchInit` (§5.5) — po to pole istnieje. Kompresji
+w dev nie ma: 2 MB z `localhost` schodzi w kilkanaście milisekund, a `Content-Encoding` na plikach
+statycznych jest konfiguracją ingressu, nie aplikacji.
 
 ### 5.2 Hub `/hubs/lobby`
 
@@ -861,9 +1948,10 @@ Match                 encja trwała
   CreatedAt, StartedAt?, EndedAt?
   HumanCount, BotCount, IsLive, Participants
   Create(map, mode, seed, roster, now) · MarkLive(endpoint, wsUrl, now) · MarkFailed(now)
-  ParticipantOf(playerId) → MatchParticipant?
+  ParticipantOf(playerId) → MatchParticipant?   (pomija tych, którzy wyszli)
+  Leave(playerId, now) → bool                   nieodwracalne; slot zostaje zajęty
 
-MatchParticipant      encja trwała: MatchId, PlayerId, Slot, Nickname, Color
+MatchParticipant      encja trwała: MatchId, PlayerId, Slot, Nickname, Color, LeftAt?
 MatchState            Allocating | Live | Completed | Failed
 ActorSlot             stałe D12: Wilderness=0, FirstActor=1, LastActor=254, Water=255
 ```
@@ -876,7 +1964,7 @@ słownika nie jest gwarantowana.
 ### 5.5 Protokół meczu — WebSocket i protobuf
 
 Drugi kanał realtime, świadomie inny niż lobby (D11): tam SignalR i JSON dla kilku wiadomości na
-minutę, tu goły WebSocket i protobuf dla strumienia binarnego 5 Hz. Schemat jest **jeden dla obu
+minutę, tu goły WebSocket i protobuf dla strumienia binarnego 10 Hz. Schemat jest **jeden dla obu
 stron** — `proto/game.proto` — a kod generuje się przy budowie: po stronie C++ z CMake, po stronie
 klienta przez `npm run proto:gen`. Do repozytorium nie trafia, bo wersjonowany rozjechałby się ze
 schematem w sposób niewidoczny w diffie.
@@ -885,10 +1973,13 @@ schematem w sposób niewidoczny w diffie.
 |---|---|---|
 | C→S | `ClientHello { ticket }` | pierwsza ramka po połączeniu, wymagana |
 | C→S | `Ping { client_time_ms }` | odsyłane jako `Pong` bez zmian |
-| C→S | `Command { seq, attack \| build }` | schemat jest, obsługi nie ma |
-| S→C | `Snapshot { tick, is_keyframe, deltas[], runs[] }` | wysyłany 5 Hz, na razie sam `tick` |
+| C→S | `Command { seq, attack \| build }` | atak i miasto obsłużone; odmowa wraca jako `CommandRejected` |
+| S→C | `MatchInit { map_id, map_sha256, map_width, map_height, tick_rate, your_slot, seed, slots[] }` | wysyłany zaraz po przyjęciu biletu; `slots[]` niesie całą obsadę — ludzi i boty |
+| S→C | `Snapshot { tick, is_keyframe, runs[] }` | keyframe zaraz po `MatchInit`, pełna tablica właścicieli w RLE |
+| S→C | `Snapshot { tick, others[] }` | zwykły, **10 Hz**; `others[]` (ranking i populacje do podpisów na mapie) dokłada się co dziesiąty, czyli raz na sekundę |
 | S→C | `Pong { client_time_ms, tick }` | odpowiedź na `Ping` |
-| S→C | `MatchInit`, `MyState`, `CommandRejected`, `MatchEnd` | schemat jest, nikt ich jeszcze nie wysyła |
+| S→C | `MyState { ludzie, złoto, przychody, miasta, podatek }` | per gracz, przy każdej wysyłce |
+| S→C | `CommandRejected` | powód odmowy; `MatchEnd` wciąż tylko w schemacie |
 
 Dwie rzeczy w schemacie są warte uwagi, bo wyglądają na przypadek, a nie są:
 
@@ -899,12 +1990,20 @@ Dwie rzeczy w schemacie są warte uwagi, bo wyglądają na przypadek, a nie są:
 - **`MyState` jest osobnym wariantem `ServerMsg`**, a nie polem `Snapshot`. To jedyna wiadomość
   per gracz, więc gdyby siedziała w snapshocie, łamałaby wspólny bufor rozsyłany do wszystkich.
   W §6 dokumentu architektury jej w `oneof` brakowało — bez tego nie miałaby jak wyjść.
+- **Czas i tempo wychodzą z serwera w sekundach i milisekundach, nigdy w tikach.** Przychody są
+  „na sekundę", a podatek niesie `tax_amount`, `tax_in_ms` i `tax_period_ms` — klient rysuje z tego
+  pasek, nie znając ani częstotliwości symulacji, ani stawki. Ta sama zasada co przy
+  `next_city_cost`: druga implementacja wzoru po stronie klienta rozjeżdża się przy pierwszej
+  zmianie balansu i objawia jako interfejs obiecujący co innego, niż robi serwer.
+- **`OwnershipRun.start_delta` mierzy przerwę, a nie pozycję.** Wynika to z tego, że keyframe
+  pomija pustkowia: gdyby wypisywał każdy run, `start_delta` byłoby zawsze zerem i pole nie miałoby
+  po co istnieć. Klient zeruje tablicę i przesuwa kursor o `start_delta + length` po każdym runie.
 
 ---
 
 ## 6. Testy
 
-### 6.1 Domena i warstwa aplikacji — 47 testów, wszystkie zielone
+### 6.1 Domena i warstwa aplikacji — 62 testy, wszystkie zielone
 
 ```bash
 dotnet test meta/Territorial.Meta.slnx
@@ -945,8 +2044,24 @@ dotnet test meta/Territorial.Meta.slnx
 - `MarkLive` zapisuje oba adresy i chwilę startu, drugie wywołanie rzuca
 - `MarkFailed` jest ciche dla meczu, który już żyje — wołane bywa ze ścieżki obsługi awarii
 - `ParticipantOf` znajduje slot uczestnika i nic nie zwraca dla kogoś z zewnątrz
+- `Leave` sprawia, że uczestnik przestaje być znajdowany, ale **jego wiersz i slot zostają** —
+  to na tej nieodwracalności stoi jawne wyjście z meczu; drugie wywołanie i wyjście kogoś
+  z zewnątrz zwracają `false`
 
-### 6.2 Ścieżka meczu w warstwie API — 26 testów, wszystkie zielone
+**`MatchManifestTests`** — kształt manifestu jest kontraktem z kodem w C++, a nie szczegółem
+implementacji, więc asercje idą po nazwach pól, nie po „jakimś sensownym JSON-ie":
+
+- slot, nick i kolor każdego człowieka; kolor jako liczba, nie tekst
+- boty **nie** trafiają do manifestu, choć wypełniają 99 ze stu slotów
+- nick spoza ASCII wychodzi escapowany (`ł`) i wraca tym samym nickiem po sparsowaniu
+- pusty roster daje poprawny manifest, a nie pusty ciąg
+
+**`HsvColorConversionTests`** — konwersja sprawdzana po nazwach kolorów, a nie przez powtórzenie
+wzoru w teście: czysta czerwień ma wyjść czerwienią. Sześć czystych odcieni co 60°, szarość przy
+zerowym nasyceniu, czerń przy zerowej jasności niezależnie od odcienia i — najważniejsze — wynik
+zawsze w zakresie `0..0xFFFFFF`, bo poza nim parser manifestu odrzuca cały roster.
+
+### 6.2 Ścieżka meczu w warstwie API — 32 testy, wszystkie zielone
 
 `MatchLauncherTests` składa prawdziwy launcher, prawdziwe lobby, broadcaster i wystawianie biletów;
 podstawione są wyłącznie porty na zewnątrz (orkiestrator, baza, transport SignalR). Launcher
@@ -963,7 +2078,11 @@ z powodów niezwiązanych z testowaną logiką.
 
 `MatchesControllerTests` — ponowne wydanie biletu: uczestnik dostaje świeży bilet i **ten sam**
 adres co w `MatchReady`; nieuczestnik, mecz w trakcie alokacji i mecz nieistniejący dają
-identyczne 404; żądanie bez tożsamości kończy się 401 i nie dotyka bazy.
+identyczne 404; żądanie bez tożsamości kończy się 401 i nie dotyka bazy. Osobno `GET /mine`:
+żywy mecz wraca razem z biletem (bo odpowiedź twierdząca zawsze kończy się wejściem do gry),
+brak meczu daje 404, a żądanie bez tożsamości 401 — również bez dotykania bazy. I `POST /leave`,
+gdzie sprawdzane jest to jedno, na czym stoi jawne wyjście: **po nim ten sam gracz dostaje 404
+przy próbie wzięcia biletu**.
 
 `StaleMatchSweeperTests` — mecze zostawione w `Allocating` są zamykane, brak takich nie generuje
 zapisu, a padnięta baza nie przewraca startu serwisu (samo zamiatanie wyjątek przepuszcza, połyka
@@ -979,9 +2098,9 @@ Nadal **brak pokrycia** dla uwierzytelniania na poziomie pipeline'u, huba end-to
 `WebApplicationFactory<Program>` jest podłączona (`InternalsVisibleTo`), ale nikt jej jeszcze
 nie używa.
 
-### 6.3 Serwer gry — 39 testów, wszystkie zielone
+### 6.3 Serwer gry — 156 testów, wszystkie zielone
 
-GoogleTest, uruchamiane przez `ctest`; cały zestaw schodzi w około sekundę.
+GoogleTest, uruchamiane przez `ctest`; cały zestaw schodzi w kilka sekund.
 
 `OptionsTest` i `MatchClockTest` — parsowanie argumentów (nieznana opcja zatrzymuje proces, slot
 poza 1..254 odpada) oraz zegar: numeracja tików, podział 10/5 Hz i to, że **anulowanie budzi zegar
@@ -997,16 +2116,63 @@ obcym kluczem, podmiana jednego znaku ładunku, wygaśnięcie razem z zapasem na
 bilet do innego meczu, slot poza zakresem, powtórne użycie tego samego `nonce` i nagłówek bez `alg`.
 
 `SessionTest` — cała droga wejścia z prawdziwym klientem Beasta na porcie efemerycznym: wejście
-biletem i odebranie snapshotu, zamknięcie `1008` przy podrobionym bilecie, odmowa upgrade'u pod
-cudzym `matchId`, wypieranie wcześniejszego połączenia na tym samym slocie oraz rozłączenie
-klienta, który przestał czytać (D4).
+biletem i odebranie mapy, zamknięcie `1008` przy podrobionym bilecie, odmowa upgrade'u pod cudzym
+`matchId`, wypieranie wcześniejszego połączenia na tym samym slocie oraz rozłączenie klienta, który
+przestał czytać (D4). Wchodzący dostaje `MatchInit` z opisem mapy i keyframe **przed** pierwszym
+zwykłym snapshotem — test czyta wiadomości w kolejności, więc złapie też ich przestawienie.
+
+`TmapTest`, `WorldTest` i `KeyframeTest` — mapa. Format sprawdzany jest głównie **przez to, co
+odrzuca**: plik bez sygnatury, z innej wersji formatu, krótszy niż zapowiada nagłówek, z nieznanym
+kodem terenu, ze spawnem na wodzie albo poza mapą. Każdy z tych plików wczytałby się bez awarii
+i zepsuł mecz później. `WorldTest` pilnuje przełożenia wody na 255 (D12) i tego, że slot 7 staje na
+siódmym spawnie — przesunięcie o jeden wyszłoby dopiero jako gracz na cudzym punkcie startowym.
+`KeyframeTest` kończy się odbudową całej tablicy właścicieli z runów, czyli tym, co robi klient.
+
+`PngTest`, `ConvertTest` i `SyntheticTest` — konwerter. Testy PNG **budują pliki bajt po bajcie**,
+bo uszkodzonej sumy kontrolnej ani wiersza zapisanego filtrem Sub nie da się poprosić od edytora
+graficznego. `ConvertTest` sprawdza każdą regułę walidacji z §4.16 osobno. `SyntheticTest` pilnuje
+determinizmu generatora: to samo ziarno musi dać ten sam plik co do bajtu, bo mapy są adresowane
+sumą kontrolną.
+
+`ManifestTest`, `RosterTest`, `RngTest` i `MatchLifetimeTest` — obsada i cykl życia. Manifest
+sprawdzany jest przez to, co odrzuca (§4.17), oraz przez jeden przypadek, który **musi przejść**:
+dwadzieścia znaków z polskimi ogonkami. Sufit nicku liczy bajty, a meta liczy znaki, więc zbyt
+ciasny odrzucałby gracza, którego meta uznaje za poprawnego — i wychodziłoby to dopiero jako mecz,
+który nie wstaje. `RosterTest` pilnuje własności, na której stoi
+replay: **dołożenie człowieka do rostera nie ma prawa przemalować pozostałych botów**. `RngTest`
+sprawdza powtarzalność ciągu i niezależność strumieni, a nie jakość rozkładu — tę gwarantuje sam
+algorytm. `MatchLifetimeTest` przechodzi wszystkie trzy warunki gaszenia **bez czekania ani jednej
+sekundy**, bo cykl życia liczy w tikach: test podaje numer tiku, który normalnie nadszedłby po
+dwóch minutach.
+
+`EconomyTest`, `AttackTest` i `SimulationTest` — symulacja (§4.20). Ekonomia sprawdzana jest przez
+**wnioski ze wzorów, nie przez przepisanie ich drugi raz**: że terytorium ma malejący zwrot, że
+przyrost ma maksimum koło 42 %, że sufit jest twardy i że podatek od trzystu tysięcy ludzi
+wyrównuje się z ryczałtem za jego okres — bo to są rzeczy, które obiecuje interfejs gracza.
+Podatek ma osobno przypięty **przykład z projektu mechaniki** (376 tysięcy ludzi na pasku → 37,6
+tysiąca złota), bo między jednostkami symulacji a liczbą z paska jest dziesięciokrotność i to
+jedyne miejsce w tym wzorze, które da się pomylić. Po stronie symulacji sprawdzane jest, że pobór
+zdarza się **raz** na okres, że nie dotyczy armii w polu ani wykreślonych, i że licznik do
+najbliższego poboru wraca po nim na pełny okres — bez tego pasek w interfejsie stałby na zerze
+przez jedną wysyłkę. `AttackTest` bierze każdą regułę osobno na czystych funkcjach: otoczona kieszeń zdobywa się
+przed kafelkiem stykającym się jednym bokiem, góry czekają dłużej niż równiny, wielki obrońca broni
+się gorzej, niż wynika z jego rozmiaru, a kolejka rozstrzyga remisy indeksem kafelka. Hamulec
+wielkiego atakującego ma osobny test **przypięty do wykładnika**, bo to stała z pierwowzoru
+i cicha pomyłka w niej nie objawia się niczym poza zmianą balansu.
+`SimulationTest` przechodzi całe przypadki na małej planszy z samego lądu — łączenie rozkazów,
+wzajemną anihilację, wycofanie z karą i bez, zwłokę powrotu i to, że nie da się jej przedłużyć
+powtórzonym rozkazem, **zwartość zdobytej plamy**, eliminację gracza, cenę miasta — i kończy się
+sprawdzeniem, na którym stoi replay: **to samo ziarno i te same rozkazy dają tę samą mapę** co do
+kafelka.
 
 ### 6.4 Pipeline CI
 
-`.github/workflows/gameserver.yml` — trzy zadania przy każdym pushu na `main` i przy każdym PR:
-budowa i testy serwera gry na Windowsie (MSVC + Ninja) i na Linuksie (GCC + Ninja) oraz generowanie
-kodu z `proto/game.proto` po stronie klienta. Zależności idą z vcpkg, z cache'em pakietów
-kluczowanym po zawartości manifestu.
+`.github/workflows/gameserver.yml` — cztery zadania przy każdym pushu na `main` i przy każdym PR:
+budowa i testy serwera gry na Windowsie (MSVC + Ninja, razem z analizą statyczną) i na Linuksie
+(GCC + Ninja), przebieg testów pod sanitizerami oraz generowanie kodu z `proto/game.proto` po
+stronie klienta. Zależności idą z vcpkg, z cache'em pakietów kluczowanym po zawartości manifestu —
+**ten sam klucz obsługuje zadanie z sanitizerami**, bo instrumentacja dotyczy naszego kodu, a nie
+pakietów, więc nie zmienia ani jednego z nich.
 
 Dwie rzeczy nieoczywiste, obie kosztowały czerwone przebiegi:
 
@@ -1022,15 +2188,139 @@ Windows nie używa generatora Visual Studio, mimo że lokalnie to on jest domyś
 wersji wpisana w preset przestaje działać w dniu, w którym obraz runnera dostaje nowszy Visual
 Studio. Zadanie samo znajduje instalację przez `vswhere` i buduje Ninją.
 
-Meta i klient nie mają jeszcze własnych zadań — to jedna linia do dopisania, gdy pojawią się testy
-frontendu (§6.5).
+Meta i klient nie mają jeszcze własnych zadań — teraz, gdy `ng test` i `dotnet test` są zielone
+i coś znaczą, to dwie linie do dopisania.
 
-### 6.5 Frontend — brak pokrycia
+#### Analiza statyczna: clang-tidy
 
-Jedyny plik testowy (`app.spec.ts`) to **nietknięty szablon** Angulara: sprawdza obecność tekstu
-`Hello, client`, którego w szablonie nie ma, i nie dostarcza `provideRouter` wymaganego przez
-`App`. Nie jest to zestaw testów, który cokolwiek weryfikuje — do napisania od zera albo do
-usunięcia.
+```bash
+pwsh gameserver/tools/run-clang-tidy.ps1
+```
+
+Zestaw reguł stoi w `gameserver/.clang-tidy` i jest **dobrany do tego kodu, a nie przepisany
+z katalogu**: każde wyłączenie ma zapisany powód. Reguła włączona „na wszelki wypadek", której
+nikt nie ma zamiaru spełniać, kończy się morzem `NOLINT` i analizatorem, którego wszyscy uczą się
+mijać wzrokiem. Pierwszy przebieg dał ponad dziewięćdziesiąt znalezisk — 62 z nich to dwie reguły
+czysto stylistyczne (nawiasy wokół `y * width + x` i `auto` przy rzutowaniach), wyłączone
+z podanym uzasadnieniem, a **wszystkie pozostałe zostały naprawione**: stałe lokalne, których
+nikt nie zmienia, rzutowania rozszerzające założone na sumę zamiast na składnik, gołe tablice
+w parametrach, `std::log(2.0)` liczone przy starcie procesu zamiast w czasie kompilacji,
+kopiowany egzekutor z `std::move`, który nic nie przenosił, i dwa `main` bez obsługi wyjątku. CI puszcza analizator
+z `--warnings-as-errors=*`, więc od teraz nowe znalezisko zatrzymuje budowę.
+
+Trzy rzeczy w tym uruchomieniu nie są oczywiste i każda kosztowałaby wieczór:
+
+- **Analizator chodzi na Windowsie, nie na Linuksie.** clang-tidy czyta bibliotekę standardową
+  kompilatora, a libstdc++ chowa `<expected>` za `__cpp_concepts >= 202002` — warunkiem, którego
+  clang nie spełnia (decyzja 6.5). Na Linuksie analiza padłaby na każdym pliku używającym
+  `std::expected`; ze standardową biblioteką Microsoftu tego problemu nie ma.
+- **`-D_CRT_USE_BUILTIN_OFFSETOF`** — bez tego `offsetof` z nagłówków Microsoftu nie jest dla
+  clanga wyrażeniem stałym i abseil spod protobufa sypie setką błędów, zanim analizator dojdzie
+  do naszego kodu.
+- **`CMAKE_CXX_SCAN_FOR_MODULES OFF`** w `CMakeLists.txt` — modułów C++20 nie używamy, a
+  skanowanie w ich poszukiwaniu dokłada do `compile_commands.json` argument `@…modmap`, którego
+  clang-tidy nie rozumie. Czyli psuje jedyne narzędzie, dla którego ten plik powstaje.
+- **`HeaderFilterRegex` musi dopasowywać oba separatory ścieżki.** Windows podaje ścieżki
+  mieszane (`…\gameserver\src\app/log.hpp`), więc wzorzec z samym ukośnikiem nie dopasowuje
+  niczego — a niedopasowany filtr nagłówków nie hałasuje, tylko **po cichu nic nie sprawdza**.
+  Pierwsza wersja tego pliku przechodziła na zielono, nie zaglądając do ani jednego nagłówka;
+  po poprawce wyszły z nich cztery klasy znalezisk, w tym prywatne pola `TicketVerifier`
+  łamiące własną konwencję nazw repo.
+
+Sprawdzane są `src/` i `tools/`, **nie testy**: makra GoogleTesta generują znaleziska stylistyczne,
+które są własnością frameworka, a nie nasze do poprawiania.
+
+> **Wersja clang-tidy na runnerze nie jest przypięta** i to jest świadomy koszt: nowszy LLVM
+> przynosi nowe reguły, więc pierwszy przebieg po podbiciu obrazu runnera może wskazać coś, czego
+> wcześniej nie było. Alternatywą byłoby instalowanie konkretnej wersji przy każdym przebiegu —
+> kilka minut na każdy push za to, żeby nie zobaczyć nowych podpowiedzi.
+
+#### Sanitizery: ASan i UBSan
+
+```bash
+cmake --preset linux-gcc-sanitizers && cmake --build --preset linux-gcc-sanitizers
+ctest --preset linux-gcc-sanitizers
+```
+
+Na Windowsie to samo z samym ASan (`windows-ninja-asan`) — MSVC nie ma UBSan. Sanitizery znajdują
+dokładnie tę klasę błędów, **której nie widzi żaden test w tym projekcie**: dostęp do zwolnionej
+ramki korutyny, wiszącą referencję w `MatchServices`, indeks kafelka poza tablicą i przepełnienie
+ze znakiem. Cały ten proces stoi na cudzych czasach życia opisanych w komentarzach — a komentarz
+nie jest egzekwowalny.
+
+`-fno-sanitize-recover=all` zamienia znalezisko UBSan w niezerowy kod wyjścia. Bez tego test
+przechodzi mimo wypisanego naruszenia, a CI świeci na zielono nad błędem.
+
+> **`ASAN_OPTIONS=detect_container_overflow=0` nie jest luzowaniem ochrony, tylko warunkiem jej
+> poprawności.** Adnotacje kontenerów ustawia kod instrumentowany, a zmienia je także `libprotobuf`
+> z vcpkg, który instrumentowany nie jest — bez tego ustawienia ASan zgłasza przepełnienie
+> w `repeated_field.h` przy pierwszym snapshocie. Ustawienie siedzi w preset**cie testów**, a nie
+> w pliku CI, żeby lokalne `ctest --preset` robiło dokładnie to samo co pipeline. Do zdjęcia
+> w dniu, w którym zależności będą budowane z ASan.
+
+Cały zestaw 156 testów przechodzi pod ASan (zweryfikowane lokalnie na MSVC).
+
+### 6.5 Frontend — 47 testów, wszystkie zielone
+
+```bash
+npm --prefix client test -- --no-watch
+```
+
+Testowana jest **wyłącznie logika, która nie potrzebuje przeglądarki** — i to nie jest
+ograniczenie, tylko podział przebiegający dokładnie tam, gdzie w widoku meczu przebiega granica
+między liczeniem a rysowaniem (§4.19).
+
+**`camera.spec.ts`** — sprawdzane są własności, nie liczby: kafelek pod kursorem ma pod nim zostać
+przy zoomie, oś, w której mapa mieści się w całości, jest środkowana zamiast dosuwana, zmniejszenie
+okna nie odsłania niczego poza mapą, a wyśrodkowanie na terytorium obejmuje **cały** jego prostokąt.
+Błąd o jeden w tym przeliczeniu nie wygląda jak błąd — wygląda jak „mapa dziwnie się przesuwa".
+
+> Test **„nigdy nie gubi mapy z ekranu"** jest zapisem realnej usterki. Pierwsza wersja wyjazdu
+> za mapę limitowała go wyłącznie trzecią częścią mapy, a to przy dużym przybliżeniu jest
+> wielokrotność kadru: dało się odjechać na całkowicie czarny ekran, bez wskazówki, w którą stronę
+> wracać. Wyszło to z przejechania mapy w przeglądarce, nie z testu — dlatego test jest teraz.
+
+**`format.spec.ts`** — liczby w interfejsie meczu: dzielenie populacji przez dziesięć i notacja
+k/m. Sprawdzane jest też, że zero po przecinku zostaje — bez tego licznik przy suficie zmieniałby
+szerokość co tik.
+
+**`deltas.spec.ts`** — dekodowanie delt własności, czyli lustro kodowania z serwera (§4.20).
+Wyciągnięte z workera do osobnej funkcji **wyłącznie po to, żeby dało się przetestować**: błąd
+o jeden w tym miejscu wygląda jak porozrzucane kafelki, a nie jak awaria, i wyszedłby dopiero
+w rozgrywce. Sprawdzane jest, że pierwszy indeks w grupie jest bezwzględny, że każda grupa ma
+własny kursor i że indeks spoza mapy nie zapisuje poza tablicą.
+
+**`tmap.spec.ts`** — pliki budowane **bajt po bajt**, bo o uszkodzony nagłówek nie da się poprosić
+konwertera. Format ma dwie niezależne implementacje (`gs::tmap` i czytnik w TS), więc każdy
+odrzucony przypadek to jedna droga mniej do cichego rozjazdu: brak sygnatury, inna wersja formatu,
+inna liczba typów terenu, plik krótszy niż zapowiada własny nagłówek.
+
+**`palette.spec.ts`** — kanały nie są zamienione (mapa z zamienionym R i B *wygląda* na działającą),
+teren zostaje widoczny pod kolorem gracza, otoczka odskakuje od wypełnienia o mierzalną
+luminancję, woda zostaje wodą nawet pod właścicielem, a slot spoza obsady nie daje czarnej dziury.
+Osobno **próg jasności pustkowia**: pierwsza wersja palety miała luminancję lądu rzędu 40 na 255
+i mapa czytała się jak zdjęcie nocne. Że „za ciemno" jest opinią, przypięliśmy ją do liczby —
+przypadkowe przyciemnienie nie przejdzie, a świadome wymaga zmiany testu. Tak samo z otoczką:
+próg 20 na luminancji jest sprawdzany dla ciemnego i jasnego koloru gracza, bo najciaśniej robi
+się w dwóch różnych miejscach — ciemnemu wypełnienie rozjaśniają góry, jasnemu brakuje miejsca
+do bieli.
+
+**`territories.spec.ts` i `isBorderTile`** — dwa rachunki na tablicy właścicieli, których błędy
+wyglądają na artefakt renderowania, a nie na pomyłkę w indeksie. Pierwszy: podpis państwa ma stać
+**na tym państwie**, więc sprawdzana jest ucieczka ze środka ciężkości przy kształcie podkowy —
+nick wypisany na cudzej ziemi czyta się tak, jakby sąsiad miał dwa państwa. Drugi: obrys na
+krawędzi mapy i brak zawinięcia wiersza — „lewy sąsiad" kafelka w zerowej kolumnie leży w płaskiej
+tablicy na końcu poprzedniego wiersza, więc bez sprawdzenia krawędzi cała lewa kolumna zostałaby
+bez obrysu.
+
+
+Poprzedni `app.spec.ts` — nietknięty szablon Angulara asertujący `Hello, client` — został usunięty.
+Nie przechodził od pierwszego dnia i trzymał cały zestaw na czerwono, czyli uniemożliwiał używanie
+`ng test` jako bramki.
+
+Czego tu nie ma: testów komponentów i workera. Sam worker jest cienką warstwą sklejającą gniazdo,
+`fetch` i renderer — sprawdza się go uruchomieniem, bo test z podstawionym `WebSocket`
+i `OffscreenCanvas` weryfikowałby atrapy, nie kod.
 
 ---
 
@@ -1051,12 +2341,24 @@ usunięcia.
 | `Match:AllocationAttempts` | `3` | ile prób rozmowy z alokatorem, zanim start uznamy za nieudany |
 | `Match:AllocationRetryDelayMilliseconds` | `250` | odstęp między próbami |
 | `Match:TicketLifetimeSeconds` | `60` | ważność biletu meczowego |
-| `Match:MatchWebSocketBaseUrl` | `wss://localhost:5001/match` | prefiks adresu meczu; pełny to `{prefiks}/{matchId}` |
+| `Match:MatchWebSocketBaseUrl` | `wss://localhost:5001/ws/match` (dev: `wss://localhost:4200/ws/match`) | prefiks adresu meczu; pełny to `{prefiks}/{matchId}`, a przy alokatorze `LocalProcess` `{prefiks}/gs{N}/{matchId}` (§4.18). Segment `/ws/` oddziela gniazdo od trasy SPA — patrz §4.19 |
 | `Match:FakeAllocatorEndpoint` | `127.0.0.1:5101` | adres oddawany przez atrapę alokatora |
 | `Match:TicketPrivateKeyPem` | brak | klucz ECDSA P-256 do podpisu biletów; w dev pusty = klucz na czas życia procesu, poza dev **wymagany** |
 | `Match:TicketPublicKeyPath` | `App_Data/ticket.pub` | dokąd meta zapisuje klucz publiczny dla serwera gry |
+| `Match:Allocator` | `Fake` (dev: `LocalProcess`) | `Fake` = adres z konfiguracji, `LocalProcess` = prawdziwy proces (§4.18) |
+| `Match:GameServerPath` | brak | binarka serwera gry; **wymagana** przy `LocalProcess`, inaczej start meta się zatrzymuje |
+| `Match:MapsRoot` | `maps` (dev: `../../../maps`) | katalog z plikami `.tmap`; z niego idzie też `/maps/...` |
+| `Match:GameServerPort` | `5101` | pierwszy port puli pętli zwrotnej dla procesów meczów |
+| `Match:GameServerPortCount` | `8` | ile kolejnych portów obejmuje pula, czyli ile meczów naraz stoi na maszynie (§4.18). **Czyta to też `client/proxy.conf.mjs`** — pula jest zdefiniowana w jednym miejscu |
+| `Match:ReadinessTimeoutMilliseconds` | `15000` | ile czekamy, aż proces zacznie nasłuchiwać |
+| `Match:PortWaitMilliseconds` | `30000` | ile czekamy, aż w puli zwolni się jakikolwiek port (§4.18) |
+| `Match:MatchIdleSeconds` | `0` (dev: `20`) | okno bezczynności procesu meczu; `0` zostawia jego domyślne 120 s |
+| `Match:FillWithBots` | `true` (dev: `false`) | czy proces meczu dopełni obsadę botami do sufitu mapy (§4.20). Wyłączone daje mecz wyłącznie z ludzi i zeruje licznik botów w lobby |
 
 Profil `https` nasłuchuje na `https://localhost:5001`.
+
+Ścieżki `Match:GameServerPath` i `Match:MapsRoot` rozwiązywane są względem katalogu roboczego
+procesu meta, czyli katalogu projektu API — stąd `../../../` w wartościach deweloperskich.
 
 Każdy z tych kluczy da się nadpisać w user-secrets — również `ConnectionStrings:Meta`, jeśli plik
 bazy ma leżeć poza katalogiem projektu.
@@ -1070,6 +2372,30 @@ bazy ma leżeć poza katalogiem projektu.
 
 Serwer deweloperski chodzi na porcie 4200 **po HTTPS**, z certyfikatem z `client/ssl/`
 (katalog jest w `.gitignore` — certyfikat trzeba wyeksportować lokalnie).
+
+**Proxy dev-servera** (`client/proxy.conf.mjs`, wpięte w `angular.json` jako `proxyConfig`):
+
+| Ścieżka | Cel | Po co |
+|---|---|---|
+| `/ws/match/gs{N}/` | `ws://127.0.0.1:{5101+N}`, `ws: true` | przeglądarka **nie otworzy `ws://` ze strony podanej po https** — to mixed content i blokada jest twarda. Prefiks `/ws/` jest konieczny: bez niego proxy przejmowałoby też trasę SPA `/match/{id}` i F5 w meczu nie ładowałoby aplikacji |
+| `/maps` | `https://localhost:5001`, `secure: false` | teren spod tego samego origin co reszta |
+
+To nie jest obejście, tylko to, czym i tak jest produkcja: TLS terminuje proxy stojące przed
+procesem meczu (D9), a klient rozmawia jednym wejściem. Ścieżka dev i ścieżka produkcyjna różnią
+się wyłącznie tym, kto stoi pośrodku.
+
+**Jeden wpis na port puli, bo dev-server nie umie wybierać celu per żądanie.** Produkcyjne wejście
+routuje po `matchId` — tutaj mapowanie `matchId → proces` zmienia się co mecz, a lista wpisów
+proxy powstaje raz, przy starcie. Dlatego o tym, do którego procesu idzie połączenie, decyduje
+segment `gs{N}` w ścieżce: **numer wpisu w puli, nie port** (D9 zostaje w mocy — klient nie ogląda
+adresów sieci wewnętrznej). Proxy ten segment zdejmuje, bo proces meczu zna wyłącznie
+`/ws/match/{matchId}`. Adres w tym kształcie buduje alokator meta, bo tylko on wie, że w dev przed
+procesami stoi właśnie to proxy (§4.18).
+
+Plik jest `.mjs`, a nie `.json`, z dwóch powodów: wpisów jest tyle, ile portów w puli — a tę
+definiuje `Match:GameServerPortCount` po stronie meta i proxy **czyta ją z tamtego pliku**, zamiast
+trzymać drugą kopię, która rozjedzie się przy pierwszej zmianie. Drugi powód to `rewrite`, którego
+w JSON-ie nie da się zapisać.
 
 ---
 
@@ -1105,15 +2431,21 @@ npm --prefix client run start
 
 Aplikacja: `https://localhost:4200`. Dokumentacja API (Scalar): `https://localhost:5001/scalar`.
 
+**⑤ Serwer gry** — w dev meta uruchamia go sama, więc binarka i mapa muszą istnieć, zanim pierwsze
+lobby dobije do zera (§8.1). Bez nich start meczu kończy się komunikatem `MatchStartFailed`
+i otwarciem następnego lobby; kto nie potrzebuje meczów, przestawia `Match:Allocator` na `Fake`.
+
 Certyfikat deweloperski dla `ng serve --ssl` trzeba wyeksportować do `client/ssl/localhost.pem`
 i `localhost.key` — samo `dotnet dev-certs https --trust` nie wystarczy, bo Angular czyta pliki
 z dysku.
 
 ### 8.1 Serwer gry
 
-Osobny cykl budowania i **na tym etapie niepotrzebny do uruchomienia aplikacji** — proces nie ma
-jeszcze gniazda, więc nic do niego nie wchodzi. Wymaga `VCPKG_ROOT` wskazującego instalację vcpkg;
-wszystkie polecenia z katalogu `gameserver/`.
+Osobny cykl budowania, ale w dev **potrzebny do uruchomienia aplikacji**: `Match:Allocator` ma
+wartość `LocalProcess`, więc lobby dobijające do zera stawia prawdziwy proces i bez binarki kończy
+się nieudanym startem meczu. Kto chce pracować nad samą metą albo klientem, przestawia
+`Match:Allocator` na `Fake` i nic więcej nie musi. Wymaga `VCPKG_ROOT` wskazującego instalację
+vcpkg; wszystkie polecenia z katalogu `gameserver/`.
 
 ```bash
 cmake --preset windows-msvc
@@ -1142,13 +2474,41 @@ Dwa generatory nie są niekonsekwencją: Ninja wymaga kompilatora na ścieżce, 
 `vcvars`, a generator Visual Studio znajduje go sam i dzięki temu `cmake --preset` działa
 z każdego terminala. **CLion nie używa żadnego z tych presetów** — patrz §8.2.
 
-Uruchomienie procesu meczu. Klucz publiczny biletów zapisuje meta przy starcie, więc wystarczy
-wskazać ten sam plik; `--max-ticks` kończy mecz po podanej liczbie tików (10 na sekundę) zamiast
-czekać na sygnał:
+Najpierw mapa, bo bez niej proces nie wstanie. Dopóki nie ma narysowanej, wystarczy wygenerowana
+z ziarna — plik `.tmap` jest w `.gitignore`, więc robi się go raz na maszynie (polecenie z korzenia
+repozytorium):
 
 ```bash
-./build/windows-msvc/RelWithDebInfo/gameserver.exe --match-id <guid> --port 5101 --ticket-key ../meta/src/Territorial.Meta.Api/App_Data/ticket.pub --max-ticks 600
+./gameserver/build/windows-msvc/RelWithDebInfo/tmapgen.exe --synthetic --out maps/synthetic.tmap --seed 1 --max-actors 100
 ```
+
+Konwersja narysowanej mapy, gdy już będzie — obrazek i opis obok siebie (§4.16):
+
+```bash
+./gameserver/build/windows-msvc/RelWithDebInfo/tmapgen.exe --source maps/moon.png --meta maps/moon.json --out maps/moon.tmap
+```
+
+Uruchomienie procesu meczu. Klucz publiczny biletów zapisuje meta przy starcie, więc wystarczy
+wskazać ten sam plik; `--max-ticks` kończy mecz po podanej liczbie tików (10 na sekundę) zamiast
+czekać na warunki z §4.17, a `--idle-seconds` skraca oba okna 120-sekundowe:
+
+```bash
+./build/windows-msvc/RelWithDebInfo/gameserver.exe --match-id <guid> --port 5101 --map ../maps/synthetic.tmap --ticket-key ../meta/src/Territorial.Meta.Api/App_Data/ticket.pub --max-ticks 600
+```
+
+Bez manifestu na wejściu proces zbuduje mecz z samych botów i powie o tym w logu. Z rosterem —
+manifest idzie stdinem (§4.17), a plik z nim wskazuje się przez `--manifest`, gdy wygodniej:
+
+```bash
+echo '{"players":[{"slot":7,"name":"Ala","colorRgb":16711680}]}' | ./build/windows-msvc/RelWithDebInfo/gameserver.exe --match-id <guid> --port 5101 --map ../maps/synthetic.tmap --ticket-key ../meta/src/Territorial.Meta.Api/App_Data/ticket.pub
+```
+
+> **Potok z PowerShella dokleja BOM** — dosłownie trzy bajty `EF BB BF` przed pierwszym znakiem
+> JSON-a. Zmierzone, nie zgadnięte. Parser zdejmuje go od 31.07.2026 (`parse_manifest`), więc
+> polecenie wyżej działa; wcześniej kończyło się komunikatem „Manifest nie jest poprawnym JSON-em"
+> wskazującym na treść, która była bez zarzutu. To jedyne miejsce w tym kodzie, gdzie przyjmujemy
+> coś, czego nie rozumiemy — BOM nie niesie żadnej informacji w strumieniu, o którym i tak wiadomo,
+> że jest UTF-8. Alokator problemu nie ma, bo pisze `UTF8Encoding` **bez** znacznika (§4.18).
 
 Wejście do meczu bez przeglądarki — klient testowy używa tego samego codegenu protobuf co
 aplikacja, więc sprawdza schemat także od strony TypeScriptu:
@@ -1178,7 +2538,10 @@ Przy własnym profilu CLion to środowisko ustawia i wszystko działa.
    z `VCPKG_ROOT`, a wszystkie flagi — standard, ostrzeżenia jako błędy, `/fp:strict` — i tak są
    w `CMakeLists.txt`, nie w presecie. Profil CLion-a i preset dają więc ten sam wynik.
 4. Konfiguracja uruchomienia „gameserver (dymny, 50 tików)" jest wersjonowana w `gameserver/.run/`
-   i pojawia się od razu.
+   i pojawia się od razu. Wymaga dwóch plików spoza projektu CMake: wygenerowanej mapy
+   (`maps/synthetic.tmap`, §8.1) i klucza publicznego biletów, który meta zapisuje przy pierwszym
+   uruchomieniu. Bez któregokolwiek z nich proces mówi wprost, czego brakuje, i kończy pracę —
+   tak samo jak pod orkiestratorem.
 
 `VCPKG_ROOT` musi być widoczne dla CLion-a — jeśli zmienna została ustawiona po jego uruchomieniu,
 trzeba go zrestartować. Gdy jej nie ma, konfiguracja kończy się komunikatem mówiącym wprost, czego
@@ -1208,22 +2571,23 @@ Uporządkowane od najbliższego do najdalszego.
 
 | # | Brak | Uwagi |
 |---|---|---|
-| 1 | **Serwer gry** | wejście działa (E1–E2, §4.15); brakuje świata, mapy i renderowania — etapy E3–E5 z [plan-serwera-gry.md](plan-serwera-gry.md). Sama symulacja to osobny plan |
+| 1 | ~~Symulacja~~ | **zrobione** — przyrost ludzi, złoto z ryczałtu i z podatku, miasta, podbój terytorium i sterowanie nimi z interfejsu (§4.20, §4.19). Zostają dwie rzeczy: **decyzje botów** (rosną i bronią się, ale same nie atakują — stąd `Match:FillWithBots=false`) i **rozkaz wycofania** w protokole: mechanika jest i ma test, brakuje wiadomości. Z pierwowzoru brakuje też dwóch rzeczy, które **nie wymagają żadnej nowej mechaniki**: **aneksja przez okrążenie** (otoczone terytorium przechodzi natychmiast i bez strat obrońcy — potrzebuje wyłącznie mapy) i **złoto po eliminacji** (zdobywca przejmuje kasę wykreślonego) |
 | 2 | ~~Podpis biletu~~ | **zrobione** — ES256 po obu stronach, etap E2 planu serwera gry |
-| 3 | **Prawdziwa alokacja** | `LocalProcessMatchAllocator`, potem agent na maszynie; dziś atrapa |
-| 4 | Odbiór wyniku meczu | `Internal/` na mTLS, idempotentny zapis po `matchId`; stan `Completed` czeka gotowy |
-| 5 | Katalog map | jedna pozycja na sztywno (`moon`, 100 aktorów); docelowo tabela z §4.2 |
+| 3 | ~~Prawdziwa alokacja~~ | **zrobione w dev** — `LocalProcessMatchAllocator` z pulą portów (§4.18). Zostaje agent na maszynie produkcyjnej |
+| 4 | Odbiór wyniku meczu | `Internal/` na mTLS, idempotentny zapis po `matchId`; stan `Completed` czeka gotowy. **Dziś nikt nie zamyka meczu**: proces gaśnie, a wiersz zostaje `Live` — stąd „abandon match" jako wyjście awaryjne (§4.10). **Zamykanie wiersza jest zrobione** (`MatchReaper`, §4.21): alokator lokalny obserwuje wyjście procesu, więc mecz przechodzi w `Completed` i meta przestaje wydawać do niego bilety. Brakuje **wyniku**: kto wygrał, ile kto miał — tego nikt nie przysyła, a stan `Completed` mówi dziś wyłącznie „procesu już nie ma" |
+| 5 | Katalog map | jedna pozycja na sztywno (`synthetic`, 100 aktorów); docelowo tabela z §4.2. Format, konwerter i serwowanie terenu są gotowe (§4.16, §5.1), brakuje pierwszej **narysowanej** mapy |
 | 6 | Konta i logowanie | dziś wyłącznie goście; `Player` jest przygotowany na dowiązanie konta |
 | 7 | PostgreSQL | dziś SQLite; wymiana dotyczy jednej linii w `AddInfrastructure` i migracji |
 | 8 | Testy API end-to-end | `WebApplicationFactory` podłączona, ale nieużywana; patrz §6.2 |
-| 9 | Testy frontendu | patrz §6.5 |
+| 9 | Testy komponentów i workera | logika czysta jest pokryta (§6.5); brakuje testów widoku meczu, a te wymagają podstawionego `WebSocket` i `OffscreenCanvas` |
 | 10 | Widoki `guide` i `contact` | zaślepki |
 | 11 | Generowanie klientów HTTP z OpenAPI | typy TS pisane ręcznie |
 | 12 | Skalowanie poziome | stan lobby w pamięci jednej instancji; wymaga backplane, lidera zegara i innego zamiatania meczów |
 
-Plan wprowadzenia punktów 1–4 opisuje [plan-alokacji-meczu.md](plan-alokacji-meczu.md); etap 1
-i większość etapu 2 są już zrobione (§4.9) — zostaje sam podpis biletu.
+[plan-alokacji-meczu.md](plan-alokacji-meczu.md) opisuje drogę do punktu 4; etapy 1–3 są zrobione
+(§4.9, §4.18), więc zostaje odbiór wyniku meczu — jedyne miejsce, w którym meta wciąż nie wie, że
+mecz się skończył.
 
-Punkt 1 ma własny dokument: [plan-serwera-gry.md](plan-serwera-gry.md) opisuje szkielet — proces
-w C++, protokół, weryfikację biletu i mapę na ekranie gracza, **bez symulacji**. Podpis biletu
-(punkt 2) wchodzi razem z nim, bo dopiero game-serwer ma go czym weryfikować.
+[plan-serwera-gry.md](plan-serwera-gry.md) jest **domknięty**: etapy E1–E5 opisują proces w C++,
+protokół, weryfikację biletu, mapę, obsadę i mapę na ekranie gracza — wszystko **bez symulacji**.
+Ta wchodzi osobnym planem i w gotową ramę.
