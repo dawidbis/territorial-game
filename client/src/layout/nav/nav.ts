@@ -4,10 +4,11 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
 import { LobbyHub } from '../../core/services/lobby-hub';
 import { ActiveRoute } from '../../core/services/active-route';
 import { formatCountdown } from '../../core/countdown';
+import { Emblem } from '../emblem';
 
 @Component({
   selector: 'app-nav',
-  imports: [RouterLink, RouterLinkActive],
+  imports: [RouterLink, RouterLinkActive, Emblem],
   templateUrl: './nav.html',
   styleUrl: './nav.css',
 })

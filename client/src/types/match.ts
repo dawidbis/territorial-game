@@ -18,6 +18,15 @@ export type MatchReady = {
  */
 export type MatchTicket = Omit<MatchReady, 'matchId'>;
 
+/**
+ * Odpowiedź na `GET /api/matches/mine` — trwający mecz wołającego albo 404.
+ *
+ * Kształtem to samo co `MatchReady`, ale przychodzi z pytania, a nie z zaproszenia:
+ * mecz jest stanem wyłącznym, więc klient upewnia się przy każdym wejściu, czy przypadkiem
+ * nie ma dokąd wrócić.
+ */
+export type ActiveMatch = MatchReady;
+
 /** Start się nie powiódł — mecz nie powstanie, a lobby otworzy się na nowo. */
 export type MatchStartFailed = {
   reason: string;

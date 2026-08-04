@@ -79,7 +79,8 @@
             "port": 4200,
             "ssl": true,
             "sslCert": "ssl/localhost.pem",
-            "sslKey": "ssl/localhost.key"
+            "sslKey": "ssl/localhost.key",
+            "proxyConfig": "proxy.conf.mjs"
           },
           "configurations": {
             "production": {

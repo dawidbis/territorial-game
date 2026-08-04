@@ -41,20 +41,23 @@
       }
     </a>
 
-    <!-- Panel nie rozciąga się na całą wysokość: to wizytówka lobby, a nie sam widok lobby. -->
-    <section class="flex flex-col border border-primary/25 bg-base-200/40">
+    <!-- Panel nie rozciąga się na całą wysokość: to wizytówka lobby, a nie sam widok lobby.
+         `relative`, bo zasłona podmiany lobby pozycjonuje się względem niego. -->
+    <section class="relative flex flex-col border border-primary/25 bg-base-200/40">
+      @if (lobby.handover()) {
+        <app-lobby-transition />
+      }
+
       <app-lobby-brief [header]="lobby.header()" />
 
       <footer
         class="flex flex-wrap items-center justify-between gap-4 border-t border-primary/25 px-4 py-3"
       >
         <div class="flex items-baseline gap-3">
+          <!-- Faza startu ma tu własny komunikat w zasłonie (`LobbyTransition`), która
+               przykrywa cały panel — więc stopka nie musi już o niej wiedzieć. -->
           <span class="text-[10px] tracking-[0.3em] uppercase opacity-60">
-            @if (lobby.allocating()) {
-              allocating server...
-            } @else {
-              {{ lobby.countdownRunning() ? 'starting in...' : 'standby' }}
-            }
+            {{ lobby.countdownRunning() ? 'starting in...' : 'standby' }}
           </span>
           <span
             role="timer"

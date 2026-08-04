@@ -1,85 +1,421 @@
 @if (matches.match(); as match) {
   <!-- Ten sam łańcuch h-dvh + min-h-0 + overflow-hidden co w lobby: strona nigdy nie
-       przewija się jako całość. Docelowo w tym miejscu siedzi kanwa mapy. -->
-  <div class="flex h-dvh flex-col bg-base-100 pt-16 text-base-content">
-    <main class="mx-auto flex w-full min-h-0 max-w-5xl flex-1 flex-col px-3 py-4 sm:px-6">
+       przewija się jako całość, bo kanwa ma wypełniać dokładnie to, co zostało. -->
+  <!-- Bez pt-16: nawigacja nie istnieje na tym widoku, więc odstęp na nią byłby paskiem
+       czerni tam, gdzie ma być mapa. -->
+  <div class="flex h-dvh flex-col overflow-hidden bg-base-100 text-base-content">
+    <main class="flex min-h-0 w-full flex-1 flex-col">
       <h1 class="sr-only">Mecz</h1>
 
-      <section class="flex min-h-0 flex-1 flex-col border border-primary/25 bg-base-200/40">
-        <div class="shrink-0 border-b border-primary/25 px-5 py-4">
-          <p class="crt-glow text-[11px] tracking-[0.3em] text-primary uppercase">
-            match link established
+      @if (!supported()) {
+        <div class="flex flex-1 items-center justify-center px-6">
+          <p role="alert" class="max-w-prose text-center text-xs leading-relaxed text-warning">
+            Ta przeglądarka nie obsługuje <code>OffscreenCanvas</code>, a bez niego mapa
+            rysowałaby się w wątku interfejsu i zacinała cały ekran. Mecz trwa — wróć na
+            nowszej przeglądarce, bilet dobierze się sam.
           </p>
         </div>
+      } @else {
+        <section class="relative flex min-h-0 flex-1 flex-col">
+          <!-- touch-none, bo bez tego przeglądarka przechwytuje przeciąganie jako gest
+               przewijania i mapa nie rusza się na dotyku. -->
+          <canvas
+            #surface
+            class="min-h-0 w-full flex-1 cursor-crosshair touch-none bg-base-300"
+            (pointerdown)="onPointerDown($event)"
+            (pointermove)="onPointerMove($event)"
+            (pointerup)="onPointerUp($event)"
+            (pointercancel)="onPointerUp($event)"
+            (wheel)="onWheel($event)"
+          ></canvas>
 
-        @if (problem(); as message) {
-          <p
-            role="alert"
-            class="shrink-0 border-b border-warning/40 bg-warning/10 px-4 py-2 text-xs text-warning"
-          >
-            {{ message }}
-          </p>
-        }
+          <!-- ─────────────────────────── nakładka ───────────────────────────
+               Cała nakładka meczu **nie idzie za motywem `crt`** i to jest świadome: leży na
+               kolorowej mapie, więc zielony fosfor na czerni albo znikałby na lądzie, albo
+               wygrywał z nim o uwagę. Ciemny granat z jednym akcentem na pasek ludzi czyta
+               się nad każdym terenem — reszta aplikacji zostaje w motywie. -->
 
-        <div class="flex min-h-0 flex-1 flex-col justify-center gap-6 overflow-y-auto px-5 py-8">
-          <dl class="flex flex-col gap-4 text-xs">
-            <div class="flex flex-col gap-1">
-              <dt class="text-[10px] tracking-[0.25em] uppercase opacity-60">match</dt>
-              <dd class="break-all tabular-nums">{{ match.matchId }}</dd>
+          <!-- Wyjście w rogu przeciwnym do rankingu: żeby nie dało się w nie trafić
+               przypadkiem, sięgając wzrokiem po cudze wyniki. -->
+          <div class="pointer-events-auto absolute top-2 right-2 flex items-center gap-2">
+            <!-- Powrót do siebie jednym kliknięciem. Bez tego jedyną drogą z drugiego końca
+                 mapy jest przeciąganie, a przy odjeździe poza mapę da się też zgubić
+                 z oczu w ogóle wszystko. -->
+            <button
+              type="button"
+              class="flex items-center gap-1 rounded border border-white/10 bg-slate-900/85 px-2 py-1 text-[11px] tracking-wider text-slate-300 uppercase backdrop-blur-sm hover:bg-white/10 hover:text-slate-100"
+              title="Pokaż całe swoje terytorium"
+              (click)="focusOn(yourSlot())"
+            >
+              <svg
+                viewBox="0 0 12 12"
+                class="h-3 w-3 fill-none stroke-current"
+                stroke-width="1.4"
+                aria-hidden="true"
+              >
+                <circle cx="6" cy="6" r="3.2" />
+                <path d="M6 0v2.2M6 9.8V12M0 6h2.2M9.8 6H12" />
+              </svg>
+              wyśrodkuj
+            </button>
+
+            <span
+              class="rounded border border-white/10 bg-slate-900/85 px-2 py-1 text-[11px] tracking-wider text-slate-300 tabular-nums backdrop-blur-sm"
+            >
+              {{ clock() }}
+            </span>
+
+            <button
+              type="button"
+              class="rounded border border-white/10 bg-slate-900/85 px-2 py-1 text-[11px] tracking-wider text-red-300 uppercase backdrop-blur-sm hover:bg-red-500/20 disabled:opacity-40"
+              [disabled]="leaving()"
+              (click)="leave()"
+            >
+              {{ leaving() ? 'wychodzę...' : 'wyjdź' }}
+            </button>
+          </div>
+
+          <!-- Ranking: tabela, a nie lista — kolumny dają się porównać wzrokiem w pionie,
+               a o to w rankingu chodzi. Własny wiersz jest doklejony na dole i podświetlony,
+               więc widać go także wtedy, gdy wypadł z czołówki. -->
+          @if (standings().length > 0) {
+            <div
+              class="pointer-events-none absolute top-2 left-2 w-56 overflow-hidden rounded-lg border border-white/10 bg-slate-900/85 text-[11px] text-slate-200 backdrop-blur-sm"
+            >
+              <table class="w-full table-fixed border-collapse">
+                <caption class="sr-only">Ranking graczy według zajętego terytorium</caption>
+
+                <thead>
+                  <tr class="border-b border-white/10 text-[9px] tracking-widest text-slate-400 uppercase">
+                    <th scope="col" class="w-6 py-1 pl-2 text-left font-normal">#</th>
+                    <th scope="col" class="py-1 text-left font-normal">gracz</th>
+                    <th scope="col" class="w-14 py-1 text-right font-normal">pola</th>
+                    <th scope="col" class="w-7 py-1 pr-1">
+                      <span class="sr-only">kadr</span>
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  @for (entry of standings(); track entry.slot; let index = $index) {
+                    <tr [class.bg-slate-700]="entry.slot === yourSlot()">
+                      <td class="py-0.5 pl-2 text-slate-400 tabular-nums">{{ index + 1 }}</td>
+                      <td class="flex items-center gap-1.5 py-0.5 pr-1">
+                        <span
+                          class="inline-block h-2 w-2 shrink-0 rounded-[2px]"
+                          [style.background-color]="colorOf(entry.slot)"
+                        ></span>
+                        <span class="truncate">{{ nameOf(entry.slot) }}</span>
+                      </td>
+                      <td class="py-0.5 text-right tabular-nums">{{ compact(entry.tiles) }}</td>
+
+                      <!-- Kadr na cudze państwo jest tą samą operacją co kadr na własne:
+                           mecz nie ma mgły wojny, a ranking bez możliwości zobaczenia,
+                           gdzie ten ktoś siedzi, jest listą nazwisk bez mapy. -->
+                      <td class="py-0.5 pr-1 text-right">
+                        <button
+                          type="button"
+                          class="pointer-events-auto rounded p-0.5 text-slate-500 transition-colors hover:bg-white/10 hover:text-slate-100"
+                          [title]="'Pokaż terytorium: ' + nameOf(entry.slot)"
+                          (click)="focusOn(entry.slot)"
+                        >
+                          <svg
+                            viewBox="0 0 12 12"
+                            class="h-3 w-3 fill-none stroke-current"
+                            stroke-width="1.4"
+                            aria-hidden="true"
+                          >
+                            <circle cx="6" cy="6" r="3.2" />
+                            <path d="M6 0v2.2M6 9.8V12M0 6h2.2M9.8 6H12" />
+                          </svg>
+                        </button>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
             </div>
+          }
 
-            <div class="flex flex-col gap-1">
-              <dt class="text-[10px] tracking-[0.25em] uppercase opacity-60">endpoint</dt>
-              <dd class="break-all">{{ match.wsUrl }}</dd>
-            </div>
+          <!-- ─────────────────────────── rozkazy ───────────────────────────
+               Dolny pasek jest jedynym sterowaniem grą, więc leży tam, gdzie spoczywa ręka,
+               i przyjmuje kliknięcia (`pointer-events-auto`) w odróżnieniu od reszty
+               nakładki. Trzy rzędy w kolejności, w jakiej gracz na nie patrzy: **stan**
+               (ludzie i złoto), **decyzja** (ile wysłać) i **rozkazy**. Suwak zostaje
+               widoczny zawsze: jego wartość decyduje o każdym ataku, więc ukryty w menu
+               byłby ustawieniem, o którym gracz zapomina. -->
+          <!-- Cały pasek znika po końcu meczu: suwak i rozkazy nad martwą planszą obiecują
+               interakcję, której nie ma, a gracz próbuje ich użyć, zanim zrozumie komunikat. -->
+          @if (!over()) {
+          <div class="pointer-events-auto absolute inset-x-0 bottom-0 flex justify-center px-2 pb-2">
+            <div
+              class="flex w-full max-w-2xl flex-col gap-1.5 rounded-lg border border-white/10 bg-slate-900/90 p-1.5 shadow-lg backdrop-blur-sm"
+            >
+              @if (own(); as state) {
+                <!-- Rząd stanu: przyrost po lewej, pula w środku, złoto po prawej. Pula
+                     dostaje cały wolny środek, bo to jedyna liczba, którą czyta się
+                     w trakcie natarcia, a nie między nimi. -->
+                <div class="flex items-stretch gap-1.5 text-[12px] font-semibold">
+                  <span
+                    class="flex shrink-0 items-center gap-1 rounded bg-amber-600/90 px-2 py-1 text-amber-50 tabular-nums"
+                    title="Przyrost ludzi na sekundę"
+                  >
+                    <svg viewBox="0 0 8 8" class="h-2.5 w-2.5 fill-current" aria-hidden="true">
+                      <circle cx="4" cy="2" r="2" />
+                      <path d="M0 8a4 4 0 0 1 8 0z" />
+                    </svg>
+                    +{{ people(state.popIncome) }}/s
+                  </span>
 
-            <div class="flex flex-col gap-1">
-              <dt class="text-[10px] tracking-[0.25em] uppercase opacity-60">ticket</dt>
-              <dd class="flex items-baseline gap-3">
+                  <!-- Pasek zapełnienia zamiast dwóch liczb obok siebie: „ile jeszcze
+                       zmieści się ludzi" to informacja przestrzenna i tak się ją czyta. -->
+                  <div
+                    class="relative min-w-0 flex-1 overflow-hidden rounded bg-slate-800"
+                    role="progressbar"
+                    [attr.aria-valuenow]="popPercent()"
+                    [attr.aria-valuemin]="0"
+                    [attr.aria-valuemax]="100"
+                    [attr.aria-valuetext]="
+                      people(state.population) + ' z ' + people(state.maxPopulation)
+                    "
+                    aria-label="Ludzie w puli"
+                  >
+                    <div
+                      class="absolute inset-y-0 left-0 bg-blue-600 transition-[width] duration-200"
+                      [style.width.%]="popPercent()"
+                    ></div>
+
+                    <span
+                      class="relative flex h-full items-center justify-center gap-1 px-2 text-white tabular-nums"
+                    >
+                      {{ people(state.population) }}
+                      <span class="text-white/60">/ {{ people(state.maxPopulation) }}</span>
+                    </span>
+                  </div>
+
+                  <!-- Armia w polu tylko wtedy, gdy jakaś jest: pusty licznik przez
+                       większość meczu uczyłby gracza, żeby w to miejsce nie patrzeć. -->
+                  @if (state.attackForce > 0) {
+                    <span
+                      class="flex shrink-0 items-center gap-1 rounded bg-red-600/80 px-2 py-1 text-red-50 tabular-nums"
+                      title="Ludzie związani w natarciach"
+                    >
+                      {{ people(state.attackForce) }}
+                    </span>
+                  }
+
+                  <!-- Złoto z paskiem cyklu podatkowego **nad** liczbą i dokładnie tak
+                       szerokim jak ona: pasek opisuje tę jedną komórkę, więc ma być jej
+                       częścią, a nie kolejnym elementem w rzędzie. Podpowiedź wisi na całej
+                       kolumnie, bo przyrost na sekundę i najbliższy pobór to jedna sprawa. -->
+                  <div class="flex shrink-0 flex-col gap-[2px]" [title]="goldTip()">
+                    <div
+                      class="h-[3px] w-full overflow-hidden rounded-full bg-slate-700"
+                      role="progressbar"
+                      [attr.aria-valuenow]="taxPercent()"
+                      [attr.aria-valuemin]="0"
+                      [attr.aria-valuemax]="100"
+                      [attr.aria-valuetext]="
+                        'podatek ' + compact(state.taxAmount) + ' za ' + taxSeconds() + ' s'
+                      "
+                      aria-label="Cykl podatkowy"
+                    >
+                      <!-- Liniowo, bo to zegar: przyspieszające albo zwalniające wypełnienie
+                           kłamałoby o tym, ile zostało czasu. -->
+                      <div
+                        class="h-full bg-yellow-400/80 transition-[width] duration-200 ease-linear"
+                        [style.width.%]="taxPercent()"
+                      ></div>
+                    </div>
+
+                    <span
+                      class="flex flex-1 items-center gap-1 rounded border border-yellow-400/70 bg-slate-800 px-2 py-1 text-yellow-300 tabular-nums"
+                    >
+                      <svg viewBox="0 0 8 8" class="h-2.5 w-2.5 fill-current" aria-hidden="true">
+                        <circle cx="4" cy="4" r="3.5" />
+                      </svg>
+                      {{ compact(state.gold) }}
+                    </span>
+                  </div>
+                </div>
+              }
+
+              <!-- Rząd decyzji. Etykieta jest przed suwakiem, bo mówi, co suwak zrobi
+                   z pulą **z rzędu wyżej** — czyta się to z góry na dół. -->
+              <label class="flex items-center gap-2">
                 <span
-                  role="timer"
-                  aria-label="Czas ważności biletu"
-                  class="crt-glow text-2xl tracking-[0.15em] text-primary tabular-nums"
+                  class="w-28 shrink-0 rounded bg-slate-800 px-2 py-1 text-center text-[12px] font-semibold text-slate-200 tabular-nums"
                 >
-                  {{ ticketCountdown() }}
+                  {{ sendPercent() }}%
+                  <span class="text-slate-400">({{ people(outgoing()) }})</span>
                 </span>
-                @if (expired()) {
-                  <span class="text-[10px] tracking-[0.25em] text-warning uppercase">expired</span>
-                }
-              </dd>
+
+                <input
+                  type="range"
+                  class="range range-xs flex-1 text-blue-600"
+                  min="1"
+                  max="100"
+                  step="1"
+                  [value]="sendPercent()"
+                  (input)="onPercentChange($event)"
+                  aria-label="Procent populacji wysyłany w ataku"
+                />
+              </label>
+
+              <!-- Rząd rozkazów. **Jeden przycisk, nie dziewięć**: pierwowzór ma tu silosy,
+                   porty i okręty, których u nas nie ma, a puste kafelki obiecywałyby
+                   mechaniki nieistniejące w symulacji. Kształt gniazda zostaje ten sam,
+                   więc kolejne rozkazy wejdą obok bez przemeblowania paska. -->
+              <div class="flex gap-1">
+                <button
+                  type="button"
+                  class="relative flex h-9 w-11 flex-col items-center justify-center rounded border border-white/10 bg-slate-800 text-slate-200 transition-colors hover:enabled:bg-slate-700 disabled:opacity-40"
+                  [class.ring-1]="canBuildCity()"
+                  [class.ring-yellow-400]="canBuildCity()"
+                  [disabled]="!canBuildCity()"
+                  (click)="buildCity()"
+                  [title]="'Miasto za ' + (own() ? compact(own()!.nextCityCost) : '—') + ' złota'"
+                >
+                  <span class="absolute top-0 left-0.5 text-[8px] leading-none text-slate-500">1</span>
+
+                  <svg viewBox="0 0 12 10" class="h-3.5 w-3.5 fill-current" aria-hidden="true">
+                    <path d="M0 10V4h4v6zM5 10V0h3v10zM9 10V5h3v5z" />
+                  </svg>
+
+                  <span class="text-[9px] leading-none tabular-nums">
+                    {{ own()?.cities ?? 0 }}
+                  </span>
+                </button>
+
+                <p class="flex-1 self-center pl-1 text-[10px] leading-tight text-slate-400">
+                  Kliknij w cudze terytorium albo w pustkowie, żeby zaatakować.
+                  Mapę przesuwa przeciąganie oraz WSAD i strzałki; kółko przybliża.
+                </p>
+              </div>
             </div>
-          </dl>
+          </div>
+          }
 
-          <p class="max-w-prose text-xs leading-relaxed opacity-70">
-            Tu wejdzie mapa i strumień meczu. Serwer gry jeszcze nie istnieje, więc pod tym
-            adresem nikt nie nasłuchuje — to jest koniec drogi, którą klient potrafi dziś przejść.
-            Bilet wygasa po minucie; odświeżenie strony dobiera nowy, dopóki mecz żyje.
-          </p>
-        </div>
+          <!-- ─────────────────────────── koniec meczu ───────────────────────────
+               Stan terminalny dostaje **własny ekran**, a nie pasek ostrzeżenia nad żywym
+               interfejsem. Poprzednia wersja zostawiała gracza z czarną planszą, wiecznym
+               „wczytywanie terenu..." i działającym suwakiem — czyli z ekranem, który
+               wygląda na zepsuty, a nie na skończony, i z którego jedyne wyjście trzeba
+               było wyczytać z komunikatu. Tu jest jeden przycisk i on robi to, co trzeba:
+               zgłasza wyjście do meta, zapamiętuje mecz jako porzucony (na wypadek, gdyby
+               meta wciąż uważała go za żywy) i wraca do kolejki. -->
+          @if (over()) {
+            <div
+              class="pointer-events-auto absolute inset-0 flex items-center justify-center bg-slate-950/80 px-4 backdrop-blur-sm"
+            >
+              <div
+                role="alertdialog"
+                aria-labelledby="match-over-title"
+                class="flex w-full max-w-sm flex-col gap-3 rounded-lg border border-white/10 bg-slate-900 p-5 text-center shadow-xl"
+              >
+                <h2 id="match-over-title" class="text-base font-semibold text-slate-100">
+                  {{ joined() ? 'Mecz się zakończył' : 'Tego meczu już nie ma' }}
+                </h2>
 
-        <footer
-          class="flex shrink-0 flex-wrap items-center justify-between gap-4 border-t border-primary/25 px-4 py-3"
-        >
-          <!-- Odnowienie ma sens dopiero po wygaśnięciu: dopóki bilet jest ważny, serwis
-               oddałby ten sam i przycisk byłby kliknięciem donikąd. -->
-          <button
-            type="button"
-            class="btn btn-outline btn-primary btn-md tracking-[0.3em] uppercase"
-            [disabled]="renewing() || !expired()"
-            (click)="renew()"
+                <p class="text-xs leading-relaxed text-slate-400">
+                  @if (joined()) {
+                    Serwer tego meczu przestał odpowiadać. Mapa poniżej jest ostatnim stanem,
+                    jaki do nas dotarł — nic się już na niej nie zmieni.
+                  } @else {
+                    Prawdopodobnie skończył się, kiedy Cię nie było. Nowe lobby zbiera się
+                    non stop, więc wracasz prosto do kolejki.
+                  }
+                </p>
+
+                <button
+                  type="button"
+                  class="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:enabled:bg-blue-500 disabled:opacity-50"
+                  [disabled]="leaving()"
+                  (click)="leave()"
+                >
+                  {{ leaving() ? 'wracam...' : 'Wróć do kolejki' }}
+                </button>
+
+                @if (linkDetail(); as detail) {
+                  <p class="text-[10px] text-slate-500">{{ detail }}</p>
+                }
+              </div>
+            </div>
+          }
+
+          <!-- Odpowiedź na rozkaz siada tuż nad paskiem akcji, bo to jego dotyczy. -->
+          @if (notice(); as message) {
+            <p
+              role="status"
+              class="pointer-events-none absolute inset-x-0 bottom-32 mx-auto w-fit rounded bg-amber-500/20 px-3 py-1 text-center text-xs text-amber-200 backdrop-blur-sm"
+            >
+              {{ message }}
+            </p>
+          }
+
+          <!-- ─────────────────────────── diagnostyka ───────────────────────────
+               Zostaje, bo bez tiku i RTT nie da się zdiagnozować meczu, który „dziwnie
+               chodzi" — ale zeszła na dół i jest wyszarzona, żeby nie konkurowała
+               z rozkazami o uwagę gracza. -->
+          <div
+            class="pointer-events-none absolute bottom-32 left-2 flex gap-3 text-[10px] tracking-[0.15em] text-slate-400/70 uppercase"
           >
-            {{ renewing() ? 'renewing...' : 'renew ticket' }}
-          </button>
+            <span
+              [class.text-primary]="link() === 'live'"
+              [class.text-warning]="link() === 'connecting' || link() === 'reconnecting'"
+              [class.text-error]="link() === 'closed'"
+            >
+              {{ link() }}
+            </span>
 
-          <button
-            type="button"
-            class="btn btn-outline btn-error btn-md tracking-[0.3em] uppercase"
-            (click)="leave()"
-          >
-            leave match
-          </button>
-        </footer>
-      </section>
+            @if (mapId(); as id) {
+              <span>{{ id }} {{ mapSize() }}</span>
+            }
+
+            <span class="tabular-nums">tik {{ tick() }}</span>
+
+            @if (rtt(); as milliseconds) {
+              <span class="tabular-nums">rtt {{ milliseconds }} ms</span>
+            }
+
+            <span class="tabular-nums">{{ slots().length }} graczy</span>
+          </div>
+
+          <!-- Bez `!over()` ten komunikat wisiał w nieskończoność na martwym meczu: teren
+               zaczyna się wczytywać dopiero z `MatchInit`, więc gdy gniazdo nigdy się nie
+               otworzyło, stan „loading" jest stanem końcowym, a nie przejściowym. -->
+          @if (terrain() === 'loading' && !over()) {
+            <p
+              class="pointer-events-none absolute inset-0 flex items-center justify-center text-xs tracking-[0.3em] text-primary uppercase"
+            >
+              wczytywanie terenu...
+            </p>
+          }
+
+          @if (terrain() === 'error') {
+            <p
+              role="alert"
+              class="absolute inset-x-0 bottom-40 mx-auto max-w-prose rounded bg-red-500/20 px-4 py-2 text-center text-xs text-red-200 backdrop-blur-sm"
+            >
+              Nie udało się wczytać terenu{{ terrainDetail() ? ': ' + terrainDetail() : '' }}.
+              Odśwież stronę, żeby spróbować ponownie — mecz trwa dalej.
+            </p>
+          }
+
+          @if (problem(); as message) {
+            <p
+              role="alert"
+              class="absolute inset-x-0 bottom-40 mx-auto max-w-prose rounded bg-amber-500/20 px-4 py-2 text-center text-xs text-amber-200 backdrop-blur-sm"
+            >
+              {{ message }}
+            </p>
+          }
+
+          <!-- Pasek o zerwanym połączeniu **zniknął**: koniec meczu ma teraz własny ekran
+               wyżej. Zdanie „wyjdź z meczu, żeby wrócić do kolejki" opisywało przycisk, który
+               gracz musiał sam znaleźć w rogu — a to jest instrukcja obsługi zamiast wyjścia. -->
+        </section>
+      }
     </main>
   </div>
 }

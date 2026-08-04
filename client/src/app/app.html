@@ -2,9 +2,15 @@
   Nakładki kineskopu wiszą na .crt-screen. Trzymamy je tutaj, a nie w home,
   żeby każda trasa dostawała ten sam ekran. Same nakładki są fixed, więc
   ten kontener nie potrzebuje wysokości ani tła.
+
+  Mecz jest wyjątkiem od obu rzeczy naraz: klasa nie wchodzi, bo winieta i linie
+  ramki odbierają mapie czytelność, a nawigacji nie ma, bo w trakcie rozgrywki
+  nie ma dokąd wyjść — patrz App.inMatch.
 -->
-<div class="crt-screen">
-  <app-nav/>
+<div [class.crt-screen]="!inMatch()">
+  @if (!inMatch()) {
+    <app-nav />
+  }
 
   <div [class.mt-24]="contained()" [class.container]="contained()" [class.mx-auto]="contained()">
     <router-outlet />

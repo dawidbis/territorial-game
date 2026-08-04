@@ -32,4 +32,16 @@ export class App {
   private lobby = inject(LobbyHub);
 
   protected contained = computed(() => !isFullBleed(this.route.path()));
+
+  /**
+   * Mecz zabiera cały ekran: bez nawigacji i bez nakładek kineskopu.
+   *
+   * Nawigacja znika, bo w trakcie rozgrywki nie ma dokąd wyjść — pozostałe drogi domyka
+   * `redirectPlayersToMatch`, a widoczne, lecz nieklikalne menu byłoby obietnicą bez pokrycia.
+   *
+   * Nakładki znikają z innego powodu: winieta gasi krawędzie do 85% czerni, a linie ramki
+   * dokładają 32% co trzeci piksel. Na tekście to klimat, na mapie terenu — utrata
+   * czytelności dokładnie tam, gdzie gracz podejmuje decyzje.
+   */
+  protected inMatch = computed(() => this.route.path().startsWith('/match/'));
 }

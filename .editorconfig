@@ -415,7 +415,13 @@ dotnet_diagnostic.CA1707.severity = none
 # Migracje EF Core
 ##########################################
 
-[meta/src/**/Persistence/Migrations/*.cs]
+# Wzorzec zaczyna się od `**`, a NIE od `meta/src/`, i to jest różnica, która kosztuje
+# zepsuty build. Roslyn dopasowuje ten glob do pełnej ścieżki pliku, a jej początek bierze
+# się z katalogu roboczego DOKŁADNIE TAK, JAK GO WPISANO — `cd meta\SRC\...` daje ścieżkę
+# z `SRC`, glob z `src` przestaje pasować, wyciszenie znika i wygenerowana migracja wywala
+# kompilację na CA1861. Windows na takie `cd` pozwala, więc nie ma czego pilnować po stronie
+# nawyku. Ogon ścieżki pochodzi już z systemu plików, czyli ma prawdziwą wielkość liter.
+[**/Persistence/Migrations/*.cs]
 
 # Pliki generowane przez `dotnet ef migrations add`. Analizatory nie mają tu czego
 # pilnować, a ręczne poprawianie wygenerowanego kodu (np. CA1861 na tablicy kolumn

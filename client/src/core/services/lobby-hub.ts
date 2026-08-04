@@ -23,6 +23,16 @@ export type JoinOutcome = JoinResult | 'Offline';
 const reconnectDelayMs = 3000;
 
 /**
+ * Minimalny czas trwania zasłony na przeskoku licznika.
+ *
+ * Przy zresetowanym oknie przeskok jest **natychmiastowy** — nie ma żadnej fazy, którą można
+ * by przeczekać. Przy starcie meczu faza jest, ale z atrapą alokatora trwa tyle, ile zapis do
+ * bazy. W obu przypadkach zasłona bez progu tylko mrugnęłaby, czyli byłaby tak samo
+ * bezużyteczna jak jej brak.
+ */
+const minimumHandoverMs = 800;
+
+/**
  * Połączenie z lobby.
  *
  * Samo podłączenie NIE oznacza dołączenia — strona główna łączy się tylko po to, żeby
@@ -46,6 +56,10 @@ export class LobbyHub {
 
   /** Czy gracz chce siedzieć w lobby. Steruje powrotem po reconnekcie i po zmianie lobby. */
   private membershipWanted = signal(false);
+
+  /** Dopalacz zasłony: trzyma ją jeszcze przez próg po tym, jak faza startu się skończyła. */
+  private handoverLinger = signal(false);
+  private handoverTimer: ReturnType<typeof setTimeout> | null = null;
 
   private connection: HubConnection;
   private connectLoop: Promise<void> | null = null;
@@ -89,10 +103,23 @@ export class LobbyHub {
 
   /**
    * Czy lobby jest w fazie startu, czyli między zamrożeniem rostera a przydzieleniem
-   * serwera. Trwa kilka sekund i wymaga własnego komunikatu — licznik stoi wtedy na zerze,
-   * co bez wyjaśnienia wygląda jak zawieszony serwis.
+   * serwera. Trwa kilka sekund; przez ten czas licznik stoi na zerze.
    */
   allocating = computed(() => this.headerState()?.state === 'Starting');
+
+  /**
+   * Czy licznik właśnie przeskakuje w górę i panel należy zasłonić (`LobbyTransition`).
+   *
+   * **Przeskok ma dwie przyczyny i obie wyglądają tak samo.** Lobby z graczami idzie przez
+   * `Starting` i zostaje zastąpione nowym; lobby puste nie ma z czego zrobić meczu, więc
+   * serwer po prostu przesuwa termin i okno leci od nowa (§4.8 dokumentacji). Ten drugi
+   * przypadek jest tym, który widać na stronie głównej najczęściej — i nie towarzyszy mu
+   * żadna zmiana stanu, tylko nowy `startsAt`.
+   *
+   * Dlatego wyzwalaczem jest sam fakt, że **termin przesunął się w przyszłość**, a nie
+   * konkretny stan lobby. Faza startu dokłada się do tego osobno, bo trwa dłużej niż próg.
+   */
+  handover = computed(() => this.allocating() || this.handoverLinger());
 
   joined = computed(() => {
     const playerId = this.players.playerProfile()?.id;
@@ -105,6 +132,11 @@ export class LobbyHub {
 
     inject(DestroyRef).onDestroy(() => {
       this.destroyed = true;
+
+      if (this.handoverTimer !== null) {
+        clearTimeout(this.handoverTimer);
+      }
+
       void this.connection.stop();
     });
 
@@ -263,7 +295,8 @@ export class LobbyHub {
   }
 
   private onHeader(header: LobbyHeader) {
-    const previousLobbyId = this.headerState()?.lobbyId;
+    const previous = this.headerState();
+    const previousLobbyId = previous?.lobbyId;
 
     this.clock.sync(header.serverNow);
     this.headerState.set(header);
@@ -273,6 +306,12 @@ export class LobbyHub {
     // mignięcie, bo nowe lobby przychodzi ułamek sekundy po awarii.
     if (header.state === 'Starting') {
       this.startProblemState.set(null);
+    }
+
+    // Próg odliczamy od WEJŚCIA w przeskok, nie od jego końca: przy szybkiej alokacji
+    // zasłona ma trwać swoje, a przy wolnej nie ma dokładać do niej niczego.
+    if (this.countdownJumpedForward(previous, header)) {
+      this.beginHandover();
     }
 
     if (!previousLobbyId || previousLobbyId === header.lobbyId) {
@@ -286,5 +325,37 @@ export class LobbyHub {
     if (this.membershipWanted()) {
       void this.join();
     }
+  }
+
+  /**
+   * Czy nowy nagłówek przesuwa licznik w górę.
+   *
+   * Patrzy na termin, a nie na stan lobby, bo przyczyny przeskoku są dwie — start meczu
+   * i zresetowane okno pustego lobby — a widać je identycznie. Pierwszy nagłówek po
+   * połączeniu nie jest przeskokiem: nie ma się z czego przesunąć.
+   */
+  private countdownJumpedForward(previous: LobbyHeader | null, next: LobbyHeader): boolean {
+    if (previous?.state !== 'Starting' && next.state === 'Starting') {
+      return true;
+    }
+
+    if (!previous?.startsAt || !next.startsAt) {
+      return false;
+    }
+
+    return Date.parse(next.startsAt) > Date.parse(previous.startsAt);
+  }
+
+  private beginHandover() {
+    if (this.handoverTimer !== null) {
+      clearTimeout(this.handoverTimer);
+    }
+
+    this.handoverLinger.set(true);
+
+    this.handoverTimer = setTimeout(() => {
+      this.handoverTimer = null;
+      this.handoverLinger.set(false);
+    }, minimumHandoverMs);
   }
 }

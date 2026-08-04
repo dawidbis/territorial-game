@@ -4,13 +4,14 @@ import { Router } from '@angular/router';
 import { LobbyHub, JoinOutcome } from '../../core/services/lobby-hub';
 import { PlayerService } from '../../core/services/player-service';
 import { LobbyBrief } from './lobby-brief';
+import { LobbyTransition } from './lobby-transition';
 import { hsvToCss } from '../../core/color';
 import { formatCountdown } from '../../core/countdown';
 import { ToastService } from '../../core/services/toast-service';
 
 @Component({
   selector: 'app-lobby',
-  imports: [LobbyBrief],
+  imports: [LobbyBrief, LobbyTransition],
   templateUrl: './lobby.html',
 })
 export class Lobby {

@@ -4,12 +4,13 @@ import { RouterLink } from '@angular/router';
 import { PlayerService } from '../../core/services/player-service';
 import { LobbyHub } from '../../core/services/lobby-hub';
 import { LobbyBrief } from '../lobby/lobby-brief';
+import { LobbyTransition } from '../lobby/lobby-transition';
 import { hsvToCss } from '../../core/color';
 import { formatCountdown } from '../../core/countdown';
 
 @Component({
   selector: 'app-home',
-  imports: [RouterLink, LobbyBrief],
+  imports: [RouterLink, LobbyBrief, LobbyTransition],
   templateUrl: './home.html',
   styleUrl: './home.css',
 })
