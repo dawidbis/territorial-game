@@ -1,0 +1,4 @@
+# Źródłem mapy jest para plików — `nazwa.png` z siatką terenu i `nazwa.json` z resztą.
+# `.tmap` jest wynikiem konwersji: waży 2 MB, robi go `tmapgen` i odtwarza się go jedną
+# komendą, więc nie ma czego wersjonować.
+*.tmap
