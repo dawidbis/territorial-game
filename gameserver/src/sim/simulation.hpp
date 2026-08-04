@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace gs
@@ -136,6 +137,13 @@ private:
     /// @returns ilu ludzi zostało po starciu czołowym.
     double absorb_counterattacks(std::uint8_t slot, std::uint8_t target, double troops);
 
+    /// Wchłania kotły powstałe w tym tiku — patrz `sim/enclosure`.
+    ///
+    /// Po natarciach, a nie w ich trakcie: w środku pętli podboju front jest w połowie ruchu,
+    /// więc „odcięty" fragment bywa odcięty wyłącznie na chwilę, między dwoma kafelkami tego
+    /// samego przejęcia.
+    void absorb_enclosures();
+
     /// Oddaje ocalałych do puli gracza i kończy natarcie.
     void give_back(Attack& attack, double malus_percent);
 
@@ -153,6 +161,11 @@ private:
     std::array<PlayerState, 256> players_{};
 
     std::vector<Attack> attacks_;
+
+    /// Przejęcia z tego tiku, które **mogły** rozciąć terytorium obrońcy: kafelek i jego
+    /// dotychczasowy właściciel. Lista jest krótka, bo wypełnia ją warunek lokalny
+    /// (`may_split`), a nie każde przejęcie.
+    std::vector<std::pair<std::uint32_t, std::uint8_t>> suspect_captures_;
 };
 
 } // namespace gs

@@ -4,6 +4,7 @@ add_executable(gameserver_tests
     attack_tests.cpp
     convert_tests.cpp
     economy_tests.cpp
+    enclosure_tests.cpp
     keyframe_tests.cpp
     manifest_tests.cpp
     match_clock_tests.cpp

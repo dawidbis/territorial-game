@@ -200,6 +200,7 @@ add_library(gameserver_core STATIC
     src/net/session_registry.cpp
     src/sim/attack.cpp
     src/sim/economy.cpp
+    src/sim/enclosure.cpp
     src/sim/rng.cpp
     src/sim/roster.cpp
     src/sim/simulation.cpp

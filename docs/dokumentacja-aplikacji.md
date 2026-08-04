@@ -74,6 +74,7 @@ i [plan-alokacji-meczu.md](plan-alokacji-meczu.md).
 | Serwer gry — ranking `PublicState` co 1 Hz | **gotowe** |
 | Serwer gry — gaszenie procesu (trzy warunki) | **gotowe** (§4.17) |
 | Serwer gry — symulacja: przyrost ludzi, złoto, podatek, miasta, podbój terytorium | **gotowe** (§4.20) |
+| Serwer gry — aneksja przez okrążenie | **gotowe** (§4.20) — odcięty kocioł przechodzi bez walki, wodę i pustkowie traktuje jako wyjście |
 | Serwer gry — decyzje botów | **brak** — boty rosną i bronią się, ale same nie atakują |
 | Klient — mapa na ekranie (worker, `OffscreenCanvas`) | **gotowe** (§4.19) |
 | Klient — reconnect po zerwaniu i po odświeżeniu strony | **gotowe** (§4.19) |
@@ -82,7 +83,7 @@ i [plan-alokacji-meczu.md](plan-alokacji-meczu.md).
 | Konta i logowanie | **brak** — tylko goście |
 | Testy domeny i warstwy aplikacji | **68 testów, wszystkie zielone** |
 | Testy ścieżki meczu w warstwie API | **32 testy, wszystkie zielone** |
-| Testy serwera gry | **156 testów, wszystkie zielone** |
+| Testy serwera gry | **166 testów, wszystkie zielone** |
 | Testy frontendu | **47 testów, wszystkie zielone** (§6.5) |
 
 ---
@@ -1345,7 +1346,48 @@ przewaga nie zdobywa państwa w jednym tiku.
 | Wycofanie | podbój staje **natychmiast**, ale ludzie wracają dopiero po **20 tikach** (2 s) i wraca ich 75 %. Przez ten czas armia jest poza pulą: nie broni, nie przyrasta, nie da się jej zawrócić ani dosłać do niej posiłków, a wciąż może zginąć w starciu czołowym. Kara i zwłoka istnieją po to, żeby odwrót był decyzją, a nie odruchem przy każdej niekorzystnej wymianie |
 | Front się urwał albo cel zniknął | ocalali wracają **bez kary** — to nie jest decyzja gracza, tylko koniec roboty |
 | Ludzie natarcia spadli poniżej 1 | atak znika i **nie ma kogo oddać**; to jest cena przegranej ofensywy |
+| Przejęcie odcięło fragment terytorium | odcięte pola **przechodzą natychmiast i bez walki** — patrz aneksja przez okrążenie niżej |
 | Obrońca stracił ostatni kafelek | wykreślony z meczu razem ze swoimi natarciami |
+
+#### Aneksja przez okrążenie
+
+**Kocioł nie jest zwykłym frontem.** Odcięty fragment terytorium nie ma jak się bronić ani jak
+zostać wzmocniony — ludzie nie chodzą po mapie, więc do otoczonych pól nikt nie dośle posiłków.
+Odbieranie ich polem po polu, po pełnej cenie, było wyłącznie podatkiem od cierpliwości: wynik
+był przesądzony w chwili domknięcia pierścienia. Od teraz domknięcie pierścienia **jest** wynikiem.
+
+Reguła ma trzy warunki i każdy jest regułą gry, nie optymalizacją:
+
+1. **Odcięty znaczy bez lądowego połączenia** z resztą terytorium tego gracza.
+2. **Jakikolwiek sąsiad wodny odbiera możliwość aneksji** — morze, jezioro i rzeka znaczą to
+   samo. Fragment nad wodą zdobywa się polem po polu, jak każdy inny.
+3. **Wyjście na pustkowie też ratuje**: „okrążony z każdej strony" ma znaczyć z każdej, a
+   fragment stykający się z wolną ziemią ma dokąd rosnąć. Krawędź świata wyjściem nie jest —
+   tamtędy nikt nie przyjdzie i nikt nie wyjdzie.
+
+**Pustkowia nie wchłania się nigdy.** Zamknięcie pierścienia wokół pustego obszaru dawałoby go
+za darmo i przestawiało tempo pierwszych minut meczu — puste pola zdobywa się tak jak dotąd.
+
+Kocioł bierze **właściciel większości pól na obwodzie**; remis rozstrzyga niższy slot, bo porządek
+totalny jest tu warunkiem replayu, tak samo jak w kolejce podboju. Aneksja całego państwa nie jest
+osobnym przypadkiem — to po prostu ostatni kocioł, jaki graczowi został, a wykreśla go ta sama
+ścieżka co przegrana walka.
+
+> **Rachunek płaci rozmiarem mniejszego kawałka, nie mapy.** Po przejęciu, które **mogło** rozciąć
+> terytorium (co najmniej dwóch sąsiadów obrońcy), z każdego z tych sąsiadów rusza fala
+> przeszukiwania — wszystkie krok w krok. Spotkanie dwóch fal znaczy, że po tej stronie nic nie
+> zostało rozcięte; wyczerpanie się fali znaczy, że objęła zamknięty fragment. Zatrzymujemy się,
+> gdy w ruchu zostaje sam trzon terytorium, więc typowy rachunek to kilkanaście pól, a nie dwa
+> miliony. Przesmyk potrafi rozpaść się na więcej niż dwa kawałki i **wszystkie** oprócz
+> największego są kotłami.
+>
+> Osobno stoi pytanie „czy całe państwo jest okrążone", bo tam nic się nie rozcina i nie ma
+> mniejszego kawałka, którym można zapłacić — jest wyłącznie przejście po całym terytorium
+> obrońcy. Dlatego to pytanie zadajemy **tylko państwom poniżej 1024 pól** (dwadzieścia terytoriów
+> startowych). Kto jest większy, nie zostaje okrążony przez zaskoczenie: najpierw musi zostać
+> zjedzony do tego rozmiaru, a wtedy reguła wraca. Bez tej granicy gracz z sześćdziesięcioma
+> tysiącami pól dostawałby przemarsz po całym swoim terytorium w każdym tiku, w którym cokolwiek
+> stracił — czyli w połowie meczu bez przerwy.
 
 > **Eliminacja następuje przy zerze kafelków, nie przy stu.** Pierwowzór wykreśla gracza poniżej
 > stu pól, ale tam rozgrywka zaczyna się od sporego terytorium — tutaj każdy aktor startuje na
@@ -2111,7 +2153,7 @@ Nadal **brak pokrycia** dla uwierzytelniania na poziomie pipeline'u, huba end-to
 `WebApplicationFactory<Program>` jest podłączona (`InternalsVisibleTo`), ale nikt jej jeszcze
 nie używa.
 
-### 6.3 Serwer gry — 156 testów, wszystkie zielone
+### 6.3 Serwer gry — 166 testów, wszystkie zielone
 
 GoogleTest, uruchamiane przez `ctest`; cały zestaw schodzi w kilka sekund.
 
@@ -2173,6 +2215,14 @@ przed kafelkiem stykającym się jednym bokiem, góry czekają dłużej niż ró
 się gorzej, niż wynika z jego rozmiaru, a kolejka rozstrzyga remisy indeksem kafelka. Hamulec
 wielkiego atakującego ma osobny test **przypięty do wykładnika**, bo to stała z pierwowzoru
 i cicha pomyłka w niej nie objawia się niczym poza zmianą balansu.
+`EnclosureTest` — aneksja przez okrążenie, z planszami **rysowanymi w teście znak po znaku**:
+cała ta reguła jest o kształcie terytorium, a kształt zapisany rysunkiem czyta się od razu.
+Sprawdzane jest, że kocioł przechodzi w całości, że woda i wyjście na pustkowie go ratują, że
+pustkowia nie wchłania się nigdy, że przesmyk rozcięty na trzy kawałki oddaje wszystkie trzy
+i że spotkanie fal nie bierze spójnego terytorium za rozcięte. Ostatni przypadek idzie całą
+drogą — rozkaz, tik symulacji, wchłonięcie — i pilnuje, żeby państwo zamknięte ze wszystkich
+stron znikło **w tym samym tiku**, w którym straci pierwsze pole, a nie polami przez trzy tiki.
+
 `SimulationTest` przechodzi całe przypadki na małej planszy z samego lądu — łączenie rozkazów,
 wzajemną anihilację, wycofanie z karą i bez, zwłokę powrotu i to, że nie da się jej przedłużyć
 powtórzonym rozkazem, **zwartość zdobytej plamy**, eliminację gracza, cenę miasta — i kończy się
@@ -2600,7 +2650,7 @@ Uporządkowane od najbliższego do najdalszego.
 
 | # | Brak | Uwagi |
 |---|---|---|
-| 1 | ~~Symulacja~~ | **zrobione** — przyrost ludzi, złoto z ryczałtu i z podatku, miasta, podbój terytorium i sterowanie nimi z interfejsu (§4.20, §4.19). Zostają dwie rzeczy: **decyzje botów** (rosną i bronią się, ale same nie atakują — stąd `Match:FillWithBots=false`) i **rozkaz wycofania** w protokole: mechanika jest i ma test, brakuje wiadomości. Z pierwowzoru brakuje też dwóch rzeczy, które **nie wymagają żadnej nowej mechaniki**: **aneksja przez okrążenie** (otoczone terytorium przechodzi natychmiast i bez strat obrońcy — potrzebuje wyłącznie mapy) i **złoto po eliminacji** (zdobywca przejmuje kasę wykreślonego) |
+| 1 | ~~Symulacja~~ | **zrobione** — przyrost ludzi, złoto z ryczałtu i z podatku, miasta, podbój terytorium i sterowanie nimi z interfejsu (§4.20, §4.19). Zostają dwie rzeczy: **decyzje botów** (rosną i bronią się, ale same nie atakują — stąd `Match:FillWithBots=false`) i **rozkaz wycofania** w protokole: mechanika jest i ma test, brakuje wiadomości. **Aneksja przez okrążenie** jest zrobiona (§4.20). Z pierwowzoru zostaje **złoto po eliminacji**: zdobywca ma przejmować kasę wykreślonego |
 | 2 | ~~Podpis biletu~~ | **zrobione** — ES256 po obu stronach, etap E2 planu serwera gry |
 | 3 | ~~Prawdziwa alokacja~~ | **zrobione w dev** — `LocalProcessMatchAllocator` z pulą portów (§4.18). Zostaje agent na maszynie produkcyjnej |
 | 4 | Odbiór wyniku meczu | **Zamykanie wiersza jest zrobione** (`MatchReaper`, §4.21): alokator lokalny obserwuje wyjście procesu, więc mecz przechodzi w `Completed` i meta przestaje wydawać do niego bilety. Brakuje **wyniku**: kto wygrał, ile kto miał — tego nikt nie przysyła, a `Completed` mówi wyłącznie „procesu już nie ma". Do zrobienia: `Internal/` na mTLS i idempotentny zapis po `matchId`; `MatchEnd` czeka w protokole, nikt go nie wysyła |

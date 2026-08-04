@@ -2,10 +2,12 @@
 
 #include "map/tmap.hpp"
 #include "sim/economy.hpp"
+#include "sim/enclosure.hpp"
 #include "sim/world.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <ranges>
 #include <utility>
 
@@ -52,6 +54,8 @@ void Simulation::tick(std::uint32_t tick)
     collect_tax(tick);
 
     run_attacks(tick);
+
+    absorb_enclosures();
 }
 
 void Simulation::grow()
@@ -224,7 +228,24 @@ bool Simulation::conquer(Attack& attack, std::uint32_t tick)
         // Front rozszerzany PRZED przejęciem — patrz `extend_front`.
         extend_front(world_, attack, rng_, next.tile, tick);
 
+        // Warunek sprawdzany **przed** przepisaniem właściciela: pyta o sąsiadów obrońcy,
+        // a po przejęciu tego kafelka jednego z nich już nie ma.
+        //
+        // Dwa powody, dla których przejęcie jest podejrzane, i każdy łapie inny kształt
+        // okrążenia: rozcięcie terytorium na dwoje (warunek lokalny) albo domknięcie
+        // pierścienia wokół małego państwa, przy którym nic się nie rozcina, bo nie ma już
+        // czego dzielić. Drugi jest bramkowany rozmiarem, bo kosztuje przejście po całym
+        // terytorium obrońcy.
+        const bool suspect = versus_player
+            && (may_split(world_, next.tile, attack.target)
+                || world_.tiles_of(attack.target) <= max_surrounded_player_tiles);
+
         world_.set_owner(next.tile, attack.attacker);
+
+        if (suspect)
+        {
+            suspect_captures_.emplace_back(next.tile, attack.target);
+        }
 
         if (versus_player && world_.tiles_of(attack.target) == 0)
         {
@@ -236,6 +257,46 @@ bool Simulation::conquer(Attack& attack, std::uint32_t tick)
     }
 
     return true;
+}
+
+void Simulation::absorb_enclosures()
+{
+    // Jeden pełny rachunek na obrońcę i tik. Podejrzanych przejęć bywa w jednym tiku wiele,
+    // a wszystkie pytają o ten sam stan mapy — liczony po zakończeniu natarć.
+    std::array<bool, 256> examined{};
+
+    for (const auto [captured, defender] : suspect_captures_)
+    {
+        // Obrońca mógł zginąć albo odzyskać kafelek między przejęciem a tą pętlą — a wtedy
+        // rachunek dotyczyłby nieistniejącego rozcięcia.
+        if (!players_[defender].alive || examined[defender])
+        {
+            continue;
+        }
+
+        examined[defender] = true;
+
+        // Przepisanie bez walki i bez strat po żadnej ze stron: kocioł nie ma jak się bronić
+        // ani jak zostać wzmocniony, więc odbieranie go polem po polu było wyłącznie podatkiem
+        // od cierpliwości.
+        for (const Enclosure& enclosure : find_enclosures(world_, captured, defender))
+        {
+            for (const std::uint32_t tile : enclosure.tiles)
+            {
+                world_.set_owner(tile, enclosure.annexer);
+            }
+        }
+
+        // Gracz bez ani jednego kafelka jest wykreślony — tą samą drogą, którą kończy go
+        // przegrana walka. Aneksja całego państwa nie jest tu osobnym przypadkiem: to po
+        // prostu ostatni kocioł, jaki mu został.
+        if (world_.tiles_of(defender) == 0)
+        {
+            eliminate(defender);
+        }
+    }
+
+    suspect_captures_.clear();
 }
 
 void Simulation::give_back(Attack& attack, double malus_percent)
