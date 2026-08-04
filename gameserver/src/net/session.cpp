@@ -1,6 +1,10 @@
 #include "net/session.hpp"
 
 #include "app/log.hpp"
+#include "net/commands.hpp"
+#include "net/session_registry.hpp"
+#include "state/match_intro.hpp"
+#include "tick/match_clock.hpp"
 
 #include <boost/asio/as_tuple.hpp>
 #include <boost/asio/co_spawn.hpp>
@@ -38,13 +42,18 @@ constexpr std::chrono::seconds handshake_timeout{10};
 /// Cisza po tym czasie oznacza martwe połączenie. Beast pinguje sam po połowie tego okna.
 constexpr std::chrono::seconds idle_timeout{30};
 
-/// Czy ścieżka żądania to `/match/{matchId}` tego procesu.
+/// Czy ścieżka żądania to `/ws/match/{matchId}` tego procesu.
 ///
 /// Sprawdzane **przed** upgrade'em: proces obsługuje jeden mecz (D7), więc żądanie pod inny
 /// identyfikator trafiło tu przez pomyłkę routingu i nie ma czego negocjować.
+///
+/// **Prefiks `/ws/` nie jest ozdobą.** Klient ma własną trasę `/match/{matchId}` — zwykłą
+/// stronę SPA — i dopóki gniazdo stało pod tym samym adresem, odświeżenie strony w trakcie
+/// meczu wysyłało żądanie dokumentu HTML tam, gdzie stoi WebSocket. Wspólne wejście na 443
+/// routuje po ścieżce (D9), więc dwie różne rzeczy nie mogą dzielić jednej.
 bool matches_path(std::string_view target, std::string_view match_id)
 {
-    constexpr std::string_view prefix = "/match/";
+    constexpr std::string_view prefix = "/ws/match/";
 
     if (!target.starts_with(prefix))
     {
@@ -79,13 +88,9 @@ bool matches_path(std::string_view target, std::string_view match_id)
 
 } // namespace
 
-Session::Session(
-    boost::asio::ip::tcp::socket socket,
-    TicketVerifier& tickets,
-    SessionRegistry& registry)
+Session::Session(boost::asio::ip::tcp::socket socket, MatchServices& services)
     : stream_(std::move(socket))
-    , tickets_(tickets)
-    , registry_(registry)
+    , services_(services)
     , pending_(stream_.get_executor(), boost::asio::steady_timer::time_point::max())
 {
 }
@@ -99,6 +104,28 @@ void Session::start()
 }
 
 boost::asio::awaitable<void> Session::run()
+{
+    if (!co_await accept_websocket())
+    {
+        co_return;
+    }
+
+    if (!co_await authenticate())
+    {
+        co_return;
+    }
+
+    join();
+
+    co_await read_loop();
+
+    stopping_ = true;
+    pending_.cancel();
+
+    leave();
+}
+
+boost::asio::awaitable<bool> Session::accept_websocket()
 {
     stream_.binary(true);
 
@@ -120,15 +147,15 @@ boost::asio::awaitable<void> Session::run()
             co_await http::async_read(stream_.next_layer(), buffer, request, as_tuple(use_awaitable));
         error)
     {
-        co_return;
+        co_return false;
     }
 
-    if (!matches_path(request.target(), tickets_.match()))
+    if (!matches_path(request.target(), services_.tickets.match()))
     {
         log::warn(
             "Żądanie pod ścieżkę {} — ten proces obsługuje mecz {}.",
             request.target(),
-            tickets_.match());
+            services_.tickets.match());
 
         http::response<http::empty_body> not_found{http::status::not_found, request.version()};
         not_found.keep_alive(false);
@@ -136,7 +163,7 @@ boost::asio::awaitable<void> Session::run()
 
         co_await http::async_write(stream_.next_layer(), not_found, as_tuple(use_awaitable));
 
-        co_return;
+        co_return false;
     }
 
     // Termin ustawiony na czas handshake'u trzeba **zdjąć**, zanim WebSocket przejmie
@@ -145,17 +172,19 @@ boost::asio::awaitable<void> Session::run()
     // wygląda to jak zerwanie sieci, w testach jednostkowych nie widać tego wcale.
     beast::get_lowest_layer(stream_).expires_never();
 
-    if (const auto [error] = co_await stream_.async_accept(request, as_tuple(use_awaitable)); error)
-    {
-        co_return;
-    }
+    const auto [error] = co_await stream_.async_accept(request, as_tuple(use_awaitable));
 
-    buffer.clear();
+    co_return !error;
+}
+
+boost::asio::awaitable<bool> Session::authenticate()
+{
+    beast::flat_buffer buffer;
 
     if (const auto [error, ignored] = co_await stream_.async_read(buffer, as_tuple(use_awaitable));
         error)
     {
-        co_return;
+        co_return false;
     }
 
     game::ClientMsg hello;
@@ -165,49 +194,62 @@ boost::asio::awaitable<void> Session::run()
     {
         co_await reject(TicketError::malformed);
 
-        co_return;
+        co_return false;
     }
 
-    auto ticket = tickets_.verify(hello.hello().ticket(), std::chrono::system_clock::now());
+    const std::expected<Ticket, TicketError> ticket =
+        services_.tickets.verify(hello.hello().ticket(), std::chrono::system_clock::now());
 
     if (!ticket)
     {
         co_await reject(ticket.error());
 
-        co_return;
+        co_return false;
     }
 
     slot_ = ticket->slot;
+    player_id_ = ticket->player_id;
 
+    co_return true;
+}
+
+void Session::join()
+{
     // Powrót gracza wypiera jego poprzednie połączenie — bez tego odświeżenie strony
     // zostawiałoby zombie trzymające slot (D14).
-    registry_.drop_previous_on(slot_, this);
-    registry_.add(shared_from_this());
+    services_.sessions.drop_previous_on(slot_, this);
+    services_.sessions.add(shared_from_this());
     registered_ = true;
 
     log::info(
         "Gracz {} wszedł na slot {}; połączeń: {}.",
-        ticket->player_id,
+        player_id_,
         slot_,
-        registry_.size());
+        services_.sessions.size());
+
+    // Kolejność jest częścią kontraktu: klient buduje paletę i tablicę właścicieli z
+    // `MatchInit`, a dopiero potem ma czym wypełnić ją keyframe'em. Obie idą do kolejki,
+    // zanim ruszy pętla wysyłki — pierwsze, co gracz zobaczy, to mapa.
+    send(services_.intro.init_for(slot_));
+    send(services_.intro.keyframe_at(services_.clock.tick()));
 
     boost::asio::co_spawn(
         stream_.get_executor(),
         [self = shared_from_this()] { return self->write_loop(); },
         boost::asio::detached);
+}
 
-    co_await read_loop();
-
-    stopping_ = true;
-    pending_.cancel();
-
-    if (registered_)
+void Session::leave()
+{
+    if (!registered_)
     {
-        registry_.remove(this);
-        registered_ = false;
-
-        log::info("Slot {} rozłączony; połączeń: {}.", slot_, registry_.size());
+        return;
     }
+
+    services_.sessions.remove(this);
+    registered_ = false;
+
+    log::info("Slot {} rozłączony; połączeń: {}.", slot_, services_.sessions.size());
 }
 
 boost::asio::awaitable<void> Session::read_loop()
@@ -246,13 +288,32 @@ boost::asio::awaitable<void> Session::read_loop()
             break;
         }
         case game::ClientMsg::kCommand:
-            // Tu wejdzie kolejka komend. Etap E2 nie ma jeszcze czego nimi poruszyć.
+            handle_command(message.command());
             break;
         case game::ClientMsg::kHello:
         case game::ClientMsg::MSG_NOT_SET:
             break;
         }
     }
+}
+
+void Session::handle_command(const game::Command& command)
+{
+    const game::RejectReason reason = execute_command(command, services_.simulation, slot_);
+
+    // Przyjęty rozkaz nie generuje żadnej odpowiedzi: jego skutek gracz zobaczy w najbliższym
+    // snapshocie. Odrzucony **musi** wrócić — rozkaz, który zniknął bez śladu, wygląda
+    // z drugiej strony dokładnie tak samo jak zerwana sieć.
+    if (reason == game::REJECT_REASON_UNSPECIFIED)
+    {
+        return;
+    }
+
+    game::ServerMsg rejected;
+    rejected.mutable_rejected()->set_seq(command.seq());
+    rejected.mutable_rejected()->set_reason(reason);
+
+    send(std::make_shared<const std::string>(rejected.SerializeAsString()));
 }
 
 boost::asio::awaitable<void> Session::write_loop()
@@ -336,8 +397,10 @@ void Session::stop()
 
     pending_.cancel();
 
+    // Wynik świadomie porzucany: to jest zrywanie połączenia, a jedyną możliwą reakcją na
+    // „nie udało się zamknąć gniazda" byłoby zamknięcie go jeszcze raz.
     boost::system::error_code ignored;
-    beast::get_lowest_layer(stream_).socket().close(ignored);
+    static_cast<void>(beast::get_lowest_layer(stream_).socket().close(ignored));
 }
 
 void Session::close_gracefully()
@@ -362,50 +425,6 @@ void Session::close_gracefully()
                 as_tuple(use_awaitable));
         },
         boost::asio::detached);
-}
-
-void SessionRegistry::add(const std::shared_ptr<Session>& session)
-{
-    sessions_.push_back(session);
-}
-
-void SessionRegistry::remove(const Session* session)
-{
-    std::erase_if(
-        sessions_,
-        [session](const std::shared_ptr<Session>& candidate) { return candidate.get() == session; });
-}
-
-void SessionRegistry::broadcast(std::shared_ptr<const std::string> frame)
-{
-    // Iteracja po żywej liście jest bezpieczna: `send` może najwyżej zamknąć gniazdo,
-    // a wypisanie z rejestru dzieje się dopiero, gdy korutyna sesji się obudzi.
-    for (const std::shared_ptr<Session>& session : sessions_)
-    {
-        session->send(frame);
-    }
-}
-
-void SessionRegistry::drop_previous_on(std::uint8_t slot, const Session* keep)
-{
-    for (const std::shared_ptr<Session>& session : sessions_)
-    {
-        if (session.get() != keep && session->slot() == slot)
-        {
-            session->stop();
-        }
-    }
-}
-
-void SessionRegistry::close_all()
-{
-    // Kopia, bo zamykanie sesji kończy ich korutyny, a te wypisują się z tej listy.
-    const std::vector<std::shared_ptr<Session>> closing = sessions_;
-
-    for (const std::shared_ptr<Session>& session : closing)
-    {
-        session->close_gracefully();
-    }
 }
 
 } // namespace gs

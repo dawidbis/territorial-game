@@ -1,6 +1,7 @@
 #pragma once
 
 #include "meta/ticket.hpp"
+#include "net/match_services.hpp"
 
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -12,18 +13,22 @@
 #include <deque>
 #include <memory>
 #include <string>
-#include <vector>
+
+namespace game
+{
+class Command;
+} // namespace game
 
 namespace gs
 {
-
-class SessionRegistry;
 
 /// Jedno połączenie gracza.
 ///
 /// Cała sesja jest jedną korutyną czytaną z góry na dół: upgrade → `ClientHello` →
 /// weryfikacja biletu → pętla wiadomości. Ramka korutyny **jest** stanem sesji, więc nie
-/// ma osobnej maszyny stanów ani przekazywania danych między uchwytami.
+/// ma osobnej maszyny stanów ani przekazywania danych między uchwytami. Każdy z tych czterech
+/// kroków ma własną metodę i własny powód, żeby się nie udać — jedna stulinijkowa korutyna
+/// znaczyła, że „gdzie tu jest sprawdzanie biletu" wymagało przeczytania obsługi HTTP.
 ///
 /// Wysyłka idzie drugą korutyną, bo snapshot przychodzi z zegara meczu, a nie w odpowiedzi
 /// na cokolwiek od gracza. Obie żyją na tym samym wątku (D8), więc kolejka nie potrzebuje
@@ -36,12 +41,9 @@ public:
     /// Przy ~1 KB na snapshot rosnąca kolejka znaczy, że klient i tak już nie żyje.
     /// Odbudowa łańcucha delt kosztowałaby keyframe i osobną ścieżkę w kodzie; rozłączenie
     /// kosztuje nic, a gracz wraca biletem.
-    static constexpr std::size_t max_queued_bytes = 256 * 1024;
+    static constexpr std::size_t max_queued_bytes = std::size_t{256} * 1024;
 
-    Session(
-        boost::asio::ip::tcp::socket socket,
-        TicketVerifier& tickets,
-        SessionRegistry& registry);
+    Session(boost::asio::ip::tcp::socket socket, MatchServices& services);
 
     /// Odpala korutynę sesji. Sesja żyje tak długo, jak ta korutyna.
     void start();
@@ -69,20 +71,43 @@ public:
     }
 
 private:
+    /// Cała sesja z lotu ptaka: cztery kroki, każdy w swojej metodzie.
     boost::asio::awaitable<void> run();
+
+    /// Żądanie HTTP, sprawdzenie ścieżki i podniesienie połączenia do WebSocketa.
+    ///
+    /// @returns `false`, gdy nie ma czego podnosić — wtedy sesja kończy się bez śladu.
+    boost::asio::awaitable<bool> accept_websocket();
+
+    /// Pierwsza ramka: `ClientHello` z biletem.
+    ///
+    /// @returns `false`, gdy bilet nie przeszedł. Połączenie jest wtedy już zamknięte kodem
+    /// `policy_error` — jednym dla wszystkich powodów, żeby nie podpowiadać próbującemu,
+    /// jak blisko celu jest.
+    boost::asio::awaitable<bool> authenticate();
+
+    /// Wpisuje sesję do rejestru i wysyła graczowi to, co widzi zaraz po wejściu.
+    void join();
+
+    /// Wypisuje sesję z rejestru. Idempotentne — wołane także po zerwanym połączeniu.
+    void leave();
 
     boost::asio::awaitable<void> read_loop();
 
     boost::asio::awaitable<void> write_loop();
+
+    /// Wykonuje rozkaz gracza i odsyła powód, jeśli symulacja go nie przyjęła.
+    ///
+    /// Odrzucenie **musi** wracać do gracza: rozkaz, który zniknął bez śladu, wygląda
+    /// z drugiej strony dokładnie tak samo jak zerwana sieć.
+    void handle_command(const game::Command& command);
 
     /// Zamyka połączenie z kodem 1008 i powodem — używane, gdy bilet nie przeszedł.
     boost::asio::awaitable<void> reject(TicketError error);
 
     boost::beast::websocket::stream<boost::beast::tcp_stream> stream_;
 
-    TicketVerifier& tickets_;
-
-    SessionRegistry& registry_;
+    MatchServices& services_;
 
     /// Budzik kolejki wyjściowej: czeka „w nieskończoność", a `cancel()` go budzi.
     boost::asio::steady_timer pending_;
@@ -93,40 +118,15 @@ private:
 
     std::uint8_t slot_ = 0;
 
+    /// Gracz z biletu — wyłącznie do logu wejścia.
+    ///
+    /// Trzymany, bo weryfikacja biletu i wpisanie do rejestru to od teraz dwa kroki, a numer
+    /// slotu nie mówi w logu nic o tym, kto pod nim siedzi.
+    std::string player_id_;
+
     bool registered_ = false;
 
     bool stopping_ = false;
-};
-
-/// Żywe sesje meczu.
-///
-/// Jedyne miejsce, które wie, komu wysłać snapshot. Bez muteksów i bez kopiowania bufora:
-/// wszystko dzieje się na jednym wątku, a ramka jest współdzielona przez `shared_ptr`.
-class SessionRegistry
-{
-public:
-    void add(const std::shared_ptr<Session>& session);
-
-    void remove(const Session* session);
-
-    /// Rozsyła tę samą ramkę do wszystkich. Złożoność zależy od liczby graczy, nie kafelków.
-    void broadcast(std::shared_ptr<const std::string> frame);
-
-    /// Rozłącza wcześniejsze połączenie na tym samym slocie.
-    ///
-    /// To jest reconnect z D14 w najprostszej postaci: gracz, który wrócił, wypiera swoje
-    /// poprzednie wcielenie. Bez tego odświeżenie strony zostawiałoby zombie trzymające slot.
-    void drop_previous_on(std::uint8_t slot, const Session* keep);
-
-    std::size_t size() const noexcept
-    {
-        return sessions_.size();
-    }
-
-    void close_all();
-
-private:
-    std::vector<std::shared_ptr<Session>> sessions_;
 };
 
 } // namespace gs

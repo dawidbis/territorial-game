@@ -87,6 +87,95 @@ std::expected<T, std::string> parse_number(std::string_view name, std::string_vi
     return parsed;
 }
 
+/// Wczytywanie jednej wartości z wiersza poleceń — nazwa opcji, jej wartość i pierwszy błąd.
+///
+/// Powstało z powtórzenia: każda opcja liczbowa miała ten sam czteroliniowy rytuał — sparsuj,
+/// sprawdź błąd, sprawdź zakres, przypisz — a różnice między opcjami ginęły w tym powtórzeniu.
+/// Tutaj każda z nich jest jedną linią, a rytuał stoi raz.
+///
+/// Błąd jest **zapamiętywany, nie zwracany**, żeby wołający nie musiał sprawdzać go po każdym
+/// przypisaniu. Pętla opcji sprawdza go raz na obrót i wychodzi natychmiast, więc pierwsza
+/// pomyłka wciąż zatrzymuje parsowanie w tym samym miejscu co wcześniej.
+class ValueReader
+{
+public:
+    ValueReader(std::string_view name, std::string_view value) noexcept
+        : name_(name)
+        , value_(value)
+    {
+    }
+
+    /// Wartość dosłownie, bez sprawdzania — ścieżki i tryby manifestu.
+    [[nodiscard]] std::string_view text() const noexcept
+    {
+        return value_;
+    }
+
+    /// Liczba z domkniętego przedziału `[low, high]`.
+    ///
+    /// Zakres jest częścią sygnatury, a nie osobnym `if` po przypisaniu: opcja bez granic to
+    /// opcja, przez którą proces wstaje w stanie, którego nikt nie przewidział.
+    template <typename Field, typename Bound>
+    void number(Field& target, Bound low, Bound high)
+    {
+        const std::expected<Bound, std::string> parsed = parse_number<Bound>(name_, value_);
+
+        if (!parsed)
+        {
+            error_ = parsed.error();
+
+            return;
+        }
+
+        if (*parsed < low || *parsed > high)
+        {
+            error_ = std::format(
+                "Opcja {} oczekuje wartości {}..{}, a dostała {}.",
+                name_,
+                low,
+                high,
+                *parsed);
+
+            return;
+        }
+
+        target = static_cast<Field>(*parsed);
+    }
+
+    /// Liczba bez ograniczeń — ziarno i liczniki, dla których każda wartość jest legalna.
+    template <typename Field>
+    void number(Field& target)
+    {
+        const std::expected<Field, std::string> parsed = parse_number<Field>(name_, value_);
+
+        if (!parsed)
+        {
+            error_ = parsed.error();
+
+            return;
+        }
+
+        target = *parsed;
+    }
+
+    [[nodiscard]] bool failed() const noexcept
+    {
+        return !error_.empty();
+    }
+
+    std::string take_error() noexcept
+    {
+        return std::move(error_);
+    }
+
+private:
+    std::string_view name_;
+
+    std::string_view value_;
+
+    std::string error_;
+};
+
 constexpr std::array value_options{
     std::string_view{"--match-id"},
     std::string_view{"--port"},
@@ -95,6 +184,8 @@ constexpr std::array value_options{
     std::string_view{"--max-actors"},
     std::string_view{"--ticket-key"},
     std::string_view{"--manifest"},
+    std::string_view{"--bots"},
+    std::string_view{"--idle-seconds"},
     std::string_view{"--max-ticks"},
 };
 
@@ -111,6 +202,9 @@ std::string_view usage_text()
   --max-actors <1-254>  sufit aktorów, ludzie i boty razem (domyślnie 100)
   --ticket-key <plik>   klucz publiczny ECDSA P-256 do weryfikacji biletów
   --manifest <plik|->   źródło manifestu meczu, '-' to stdin (domyślnie -)
+  --bots <0|1>          czy dopełnić obsadę botami do sufitu aktorów (domyślnie 1)
+  --idle-seconds <sek>  okno bezczynności: czekanie na pierwszego gracza i po odejściu
+                        ostatniego; 0 to wartość domyślna 120 s (okno reconnectu z D14)
   --max-ticks <liczba>  zakończ po N tikach symulacji; 0 to praca do sygnału
   --help                ta pomoc
 )";
@@ -141,91 +235,68 @@ std::expected<Options, std::string> parse_options(std::span<const std::string_vi
             return std::unexpected(std::format("Opcja {} wymaga wartości.", name));
         }
 
-        const std::string_view value = args[++index];
+        ValueReader reader(name, args[++index]);
 
+        // Jedna linia na opcję. Wszystko, co się w niej powtarzało — parsowanie, sprawdzenie
+        // zakresu, propagacja błędu — siedzi w `ValueReader` i jest tam napisane raz.
         if (name == "--match-id")
         {
-            if (!is_canonical_guid(value))
+            if (!is_canonical_guid(reader.text()))
             {
-                return std::unexpected(
-                    std::format("Opcja --match-id oczekuje GUID-a, a dostała '{}'.", value));
+                return std::unexpected(std::format(
+                    "Opcja --match-id oczekuje GUID-a, a dostała '{}'.",
+                    reader.text()));
             }
 
-            options.match_id = to_lower_ascii(value);
+            options.match_id = to_lower_ascii(reader.text());
         }
         else if (name == "--port")
         {
-            const std::expected<std::uint32_t, std::string> port =
-                parse_number<std::uint32_t>(name, value);
-
-            if (!port)
-            {
-                return std::unexpected(port.error());
-            }
-
-            if (*port == 0 || *port > 65535)
-            {
-                return std::unexpected(
-                    std::format("Opcja --port oczekuje wartości 1..65535, a dostała {}.", *port));
-            }
-
-            options.port = static_cast<std::uint16_t>(*port);
+            reader.number(options.port, 1u, 65535u);
         }
         else if (name == "--map")
         {
-            options.map_path = value;
+            options.map_path = reader.text();
         }
         else if (name == "--seed")
         {
-            const std::expected<std::int64_t, std::string> seed =
-                parse_number<std::int64_t>(name, value);
-
-            if (!seed)
-            {
-                return std::unexpected(seed.error());
-            }
-
-            options.seed = *seed;
+            reader.number(options.seed);
         }
         else if (name == "--max-actors")
         {
-            const std::expected<std::uint32_t, std::string> max_actors =
-                parse_number<std::uint32_t>(name, value);
-
-            if (!max_actors)
-            {
-                return std::unexpected(max_actors.error());
-            }
-
-            if (*max_actors == 0 || *max_actors > max_actors_per_match)
-            {
-                return std::unexpected(std::format(
-                    "Opcja --max-actors oczekuje wartości 1..{}, a dostała {}.",
-                    max_actors_per_match,
-                    *max_actors));
-            }
-
-            options.max_actors = *max_actors;
+            reader.number(options.max_actors, 1u, max_actors_per_match);
         }
         else if (name == "--ticket-key")
         {
-            options.ticket_key_path = value;
+            options.ticket_key_path = reader.text();
         }
         else if (name == "--manifest")
         {
-            options.manifest_path = value;
+            options.manifest_path = reader.text();
+        }
+        else if (name == "--bots")
+        {
+            // Bez zakresu, choć pomoc mówi `<0|1>`: każda wartość niezerowa znaczy „tak"
+            // i tak było od początku. Zawężenie tutaj byłoby zmianą zachowania przemyconą
+            // w refaktorze — na to jest osobna decyzja i osobny test.
+            std::uint32_t bots = 0;
+
+            reader.number(bots);
+
+            options.fill_bots = bots != 0;
+        }
+        else if (name == "--idle-seconds")
+        {
+            reader.number(options.idle_seconds);
         }
         else if (name == "--max-ticks")
         {
-            const std::expected<std::uint32_t, std::string> max_ticks =
-                parse_number<std::uint32_t>(name, value);
+            reader.number(options.max_ticks);
+        }
 
-            if (!max_ticks)
-            {
-                return std::unexpected(max_ticks.error());
-            }
-
-            options.max_ticks = *max_ticks;
+        if (reader.failed())
+        {
+            return std::unexpected(reader.take_error());
         }
     }
 

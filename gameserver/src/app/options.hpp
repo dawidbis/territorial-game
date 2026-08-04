@@ -40,6 +40,23 @@ struct Options
     /// Źródło manifestu: `-` oznacza stdin i to jest wariant docelowy.
     std::string manifest_path = "-";
 
+    /// Okno bezczynności w sekundach: ile proces czeka na pierwszego gracza i ile po odejściu
+    /// ostatniego. 0 znaczy „wartość domyślna", czyli 120 s z D14.
+    ///
+    /// Istnieje **wyłącznie dla dev**, gdzie na maszynie stoi jeden mecz naraz i port jest
+    /// wpisany w proxy klienta. Dwuminutowe okno znaczy tam, że po każdym meczu przez dwie
+    /// minuty nie da się zacząć następnego — a to jest różnica między „można grać" a „nie
+    /// można". Na produkcji zostaje 120 s, bo tyle trwa okno reconnectu obiecane graczowi.
+    std::uint32_t idle_seconds = 0;
+
+    /// Czy dopełnić obsadę botami do sufitu aktorów.
+    ///
+    /// Wyłączone daje mecz wyłącznie z ludzi: reszta mapy zostaje pustkowiem, które każdy
+    /// może zająć. Przełącznik, a nie usunięcie kodu, bo boty wracają — dziś nie podejmują
+    /// jeszcze żadnych decyzji, więc mecz z dziewięćdziesięcioma dziewięcioma z nich jest
+    /// meczem z dziewięćdziesięcioma dziewięcioma nieruchomymi celami.
+    bool fill_bots = true;
+
     /// Zatrzymanie po N tikach symulacji; 0 znaczy „do sygnału".
     ///
     /// Wyłącznie dla CI i ręcznego dymnego testu: proces, który sam kończy pracę, daje

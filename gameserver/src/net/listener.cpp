@@ -2,6 +2,7 @@
 
 #include "app/log.hpp"
 #include "net/session.hpp"
+#include "net/session_registry.hpp"
 
 #include <boost/asio/as_tuple.hpp>
 #include <boost/asio/ip/address.hpp>
@@ -33,13 +34,12 @@ boost::asio::ip::tcp::acceptor listen_on_loopback(
 
 boost::asio::awaitable<void> accept_connections(
     std::shared_ptr<boost::asio::ip::tcp::acceptor> acceptor,
-    TicketVerifier& tickets,
-    SessionRegistry& registry)
+    MatchServices& services)
 {
     log::info(
-        "Nasłuch na ws://127.0.0.1:{}/match/{}.",
+        "Nasłuch na ws://127.0.0.1:{}/ws/match/{}.",
         acceptor->local_endpoint().port(),
-        tickets.match());
+        services.tickets.match());
 
     for (;;)
     {
@@ -60,7 +60,7 @@ boost::asio::awaitable<void> accept_connections(
             continue;
         }
 
-        std::make_shared<Session>(std::move(socket), tickets, registry)->start();
+        std::make_shared<Session>(std::move(socket), services)->start();
     }
 }
 

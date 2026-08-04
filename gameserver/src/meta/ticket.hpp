@@ -20,7 +20,7 @@ namespace gs
 /// Jeden zestaw dla logów i dla kodu zamknięcia WebSocketa, ale **nie dla klienta** —
 /// gracz dostaje jedno „bilet odrzucony". Rozróżnienie „zły podpis" od „nie ten mecz"
 /// mówiłoby próbującemu, jak blisko jest celu.
-enum class TicketError
+enum class TicketError : std::uint8_t
 {
     malformed,
     unsupported_algorithm,
@@ -44,7 +44,7 @@ struct Ticket
 
     std::string nonce;
 
-    std::chrono::system_clock::time_point expires_at{};
+    std::chrono::system_clock::time_point expires_at;
 };
 
 /// Weryfikuje bilety meczowe offline, bez jednego zapytania do meta (§4.3).
@@ -56,6 +56,12 @@ struct Ticket
 /// dzięki D7 — jeden proces obsługuje jeden mecz, więc pamięć o zużytych biletach ginie
 /// razem z nim i nie ma czego synchronizować. Zbiór rośnie o wpis na wejście gracza,
 /// czyli o rzędy wielkości mniej, niż trwa mecz.
+///
+/// Przeniesienie może rzucić — zbiór mieszający zużytych `nonce` nie ma przenoszenia bez
+/// wyjątku w każdej implementacji biblioteki standardowej. Dzieje się dokładnie raz, przy
+/// zwrocie z fabryki, i wyjątek stamtąd znaczy nieudany start procesu, czyli sytuację, którą
+/// i tak obsługujemy.
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TicketVerifier
 {
 public:
@@ -86,18 +92,18 @@ public:
     /// Ilu graczy weszło tym weryfikatorem. Wyłącznie do logów i testów.
     std::size_t admitted() const noexcept
     {
-        return used_nonces.size();
+        return used_nonces_.size();
     }
 
     /// Mecz obsługiwany przez ten proces — ta sama wartość musi stać w ścieżce upgrade'u.
     const std::string& match() const noexcept
     {
-        return match_id;
+        return match_id_;
     }
 
     std::uint32_t actor_limit() const noexcept
     {
-        return max_actors;
+        return max_actors_;
     }
 
 private:
@@ -108,13 +114,13 @@ private:
 
     TicketVerifier(evp_pkey_st* key, std::string match_id, std::uint32_t max_actors);
 
-    std::unique_ptr<evp_pkey_st, KeyDeleter> key;
+    std::unique_ptr<evp_pkey_st, KeyDeleter> key_;
 
-    std::string match_id;
+    std::string match_id_;
 
-    std::uint32_t max_actors;
+    std::uint32_t max_actors_;
 
-    std::unordered_set<std::string> used_nonces;
+    std::unordered_set<std::string> used_nonces_;
 };
 
 } // namespace gs

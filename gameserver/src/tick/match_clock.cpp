@@ -9,8 +9,11 @@
 namespace gs
 {
 
-MatchClock::MatchClock(boost::asio::any_io_executor executor, TickRates rates)
-    : timer_(std::move(executor))
+// Egzekutor przez stałą referencję, nie przez wartość: `steady_timer` i tak przyjmuje go
+// referencją, więc przeniesienie nic nie przenosi, a kopia w parametrze kosztuje przy każdym
+// utworzeniu zegara.
+MatchClock::MatchClock(const boost::asio::any_io_executor& executor, TickRates rates)
+    : timer_(executor)
     , rates_(rates)
     , next_deadline_(Clock::now() + rates.sim_period)
 {

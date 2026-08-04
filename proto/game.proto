@@ -108,17 +108,30 @@ message TileDeltaGroup {
 message PublicState {
   uint32 slot            = 1;
   uint32 territory_tiles = 2;
+  uint32 population      = 3;   // żywi ludzie w puli, bez tych związanych w natarciach —
+                                // klient podpisuje nimi terytorium na mapie
 }
 
 // Jedyna wiadomość per gracz — łamie wspólny bufor broadcastu, dlatego jest osobnym
 // wariantem `ServerMsg`, a nie polem w `Snapshot`.
 message MyState {
-  uint32 population   = 1;
-  uint32 gold         = 2;
-  uint32 pop_income   = 3;
-  uint32 gold_income  = 4;
-  uint32 attack_force = 5;
-  uint32 cities       = 6;
+  uint32 population     = 1;
+  uint32 gold           = 2;
+  uint32 pop_income     = 3;   // na SEKUNDĘ, nie na tik — tik jest szczegółem symulacji
+  uint32 gold_income    = 4;   // jw.
+  uint32 attack_force   = 5;   // ludzie związani w trwających natarciach
+  uint32 cities         = 6;
+  uint32 max_population = 7;   // sufit; przyrost hamuje względem niego, więc bez tego
+                               // sama pula ludzi nic graczowi nie mówi
+  uint32 next_city_cost = 8;   // cena kolejnego miasta — liczona po stronie serwera, żeby
+                               // przycisk nie obiecywał innej ceny, niż ten pobierze
+
+  // Podatek: cykliczny pobór ze skarbca, liczony z żywej populacji. Wszystkie trzy pola
+  // idą w milisekundach i w złocie, a nie w tikach — tik jest szczegółem symulacji,
+  // a klient rysuje z tego pasek, więc nie ma powodu, żeby znał ani okres, ani stawkę.
+  uint32 tax_amount    = 9;    // ile złota przyniesie najbliższy pobór przy dzisiejszej puli
+  uint32 tax_in_ms     = 10;   // ile milisekund do niego
+  uint32 tax_period_ms = 11;   // długość pełnego cyklu
 }
 
 message CommandRejected {

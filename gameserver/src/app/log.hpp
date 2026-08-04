@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <format>
 #include <string_view>
 #include <utility>
@@ -7,7 +8,10 @@
 namespace gs::log
 {
 
-enum class Level
+/// Typ bazowy podany wprost: bez niego wyliczenie zajmuje `int`, czyli cztery bajty na trzy
+/// wartości. Tu bez znaczenia, ale ta sama reguła obowiązuje przy `Terrain` i slotach, gdzie
+/// idą miliony sztuk — więc niech będzie jedna konwencja, a nie dwie.
+enum class Level : std::uint8_t
 {
     info,
     warn,

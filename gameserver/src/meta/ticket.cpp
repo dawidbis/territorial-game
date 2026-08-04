@@ -32,15 +32,18 @@ constexpr auto decode_table = []
     std::array<signed char, 256> table{};
     table.fill(-1);
 
-    for (int index = 0; index < 26; ++index)
+    // Liczniki jako `std::size_t`, żeby indeks powstawał bez rozszerzania `int` do rozmiaru
+    // wskaźnika w środku wyrażenia — rzutowanie założone na sumę ukrywa, który składnik
+    // faktycznie się rozszerza.
+    for (std::size_t index = 0; index < 26; ++index)
     {
-        table[static_cast<std::size_t>('A' + index)] = static_cast<signed char>(index);
-        table[static_cast<std::size_t>('a' + index)] = static_cast<signed char>(26 + index);
+        table[static_cast<std::size_t>('A') + index] = static_cast<signed char>(index);
+        table[static_cast<std::size_t>('a') + index] = static_cast<signed char>(26 + index);
     }
 
-    for (int index = 0; index < 10; ++index)
+    for (std::size_t index = 0; index < 10; ++index)
     {
-        table[static_cast<std::size_t>('0' + index)] = static_cast<signed char>(52 + index);
+        table[static_cast<std::size_t>('0') + index] = static_cast<signed char>(52 + index);
     }
 
     table[static_cast<std::size_t>('-')] = 62;
@@ -139,7 +142,7 @@ bool verify_signature(
 
     const auto* bytes = reinterpret_cast<const unsigned char*>(raw_signature.data());
 
-    SignaturePtr signature(ECDSA_SIG_new(), &ECDSA_SIG_free);
+    const SignaturePtr signature(ECDSA_SIG_new(), &ECDSA_SIG_free);
 
     BIGNUM* r = BN_bin2bn(bytes, signature_half, nullptr);
     BIGNUM* s = BN_bin2bn(bytes + signature_half, signature_half, nullptr);
@@ -165,7 +168,7 @@ bool verify_signature(
         return false;
     }
 
-    DigestContextPtr context(EVP_MD_CTX_new(), &EVP_MD_CTX_free);
+    const DigestContextPtr context(EVP_MD_CTX_new(), &EVP_MD_CTX_free);
 
     if (!context)
     {
@@ -217,9 +220,9 @@ void TicketVerifier::KeyDeleter::operator()(evp_pkey_st* key) const noexcept
 }
 
 TicketVerifier::TicketVerifier(evp_pkey_st* key, std::string match_id, std::uint32_t max_actors)
-    : key(key)
-    , match_id(std::move(match_id))
-    , max_actors(max_actors)
+    : key_(key)
+    , match_id_(std::move(match_id))
+    , max_actors_(max_actors)
 {
 }
 
@@ -228,7 +231,7 @@ std::expected<TicketVerifier, std::string> TicketVerifier::from_pem(
     std::string match_id,
     std::uint32_t max_actors)
 {
-    BioPtr bio(
+    const BioPtr bio(
         BIO_new_mem_buf(public_key_pem.data(), static_cast<int>(public_key_pem.size())),
         &BIO_free);
 
@@ -263,7 +266,7 @@ std::expected<TicketVerifier, std::string> TicketVerifier::from_pem_file(
     std::string match_id,
     std::uint32_t max_actors)
 {
-    std::ifstream file(path, std::ios::binary);
+    const std::ifstream file(path, std::ios::binary);
 
     if (!file)
     {
@@ -320,7 +323,7 @@ std::expected<Ticket, TicketError> TicketVerifier::verify(
 
     // Podpis PRZED czytaniem ładunku: dopóki nie zgadza się podpis, claimy są danymi
     // od obcego i nie wolno na nich niczego opierać.
-    if (!verify_signature(key.get(), token.substr(0, second_dot), *signature))
+    if (!verify_signature(key_.get(), token.substr(0, second_dot), *signature))
     {
         return std::unexpected(TicketError::bad_signature);
     }
@@ -363,26 +366,26 @@ std::expected<Ticket, TicketError> TicketVerifier::verify(
         return std::unexpected(TicketError::expired);
     }
 
-    if (!equals_ignoring_case(match->get_string(), match_id))
+    if (!equals_ignoring_case(match->get_string(), match_id_))
     {
         return std::unexpected(TicketError::wrong_match);
     }
 
     const std::int64_t slot_number = slot->get_int64();
 
-    if (slot_number < 1 || slot_number > static_cast<std::int64_t>(max_actors))
+    if (slot_number < 1 || slot_number > static_cast<std::int64_t>(max_actors_))
     {
         return std::unexpected(TicketError::bad_slot);
     }
 
     std::string nonce_value{nonce->get_string()};
 
-    if (used_nonces.contains(nonce_value))
+    if (used_nonces_.contains(nonce_value))
     {
         return std::unexpected(TicketError::replayed);
     }
 
-    used_nonces.insert(nonce_value);
+    used_nonces_.insert(nonce_value);
 
     return Ticket{
         std::string{player->get_string()},

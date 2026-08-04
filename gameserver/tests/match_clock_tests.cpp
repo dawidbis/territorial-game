@@ -67,8 +67,19 @@ TEST(MatchClockTest, NumbersTicksConsecutivelyFromOne)
     }
 }
 
-// D3: snapshot leci co drugi tik symulacji. Test pilnuje samego podziału, bo to on
-// decyduje, ile ruchu wychodzi z serwera.
+// Domyślne tempo jest **kontraktem z klientem**, a nie ustawieniem: klient animuje
+// przejmowanie kafelków z tego, co przyszło ostatnią paczką, więc wysyłka rzadsza niż
+// symulacja zamienia animację w zgadywanie. Świadome odstępstwo od D3 („send 5 Hz").
+TEST(MatchClockTest, SendsOnEveryTickByDefault)
+{
+    const gs::TickRates rates;
+
+    EXPECT_EQ(rates.send_every, 1u);
+    EXPECT_EQ(rates.sim_period, std::chrono::milliseconds{100});
+}
+
+// Podział zostaje konfigurowalny, bo to on decyduje, ile ruchu wychodzi z serwera —
+// powrót do wysyłki co drugi tik jest jedną wartością, nie przepisaniem pętli.
 TEST(MatchClockTest, MarksEverySecondTickForSending)
 {
     const std::vector<gs::Tick> ticks = collect(gs::TickRates{fast_step, 2}, 6);

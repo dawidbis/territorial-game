@@ -10,8 +10,7 @@
 namespace gs
 {
 
-class TicketVerifier;
-class SessionRegistry;
+struct MatchServices;
 
 /// Otwiera nasłuch na pętli zwrotnej.
 ///
@@ -36,7 +35,6 @@ boost::asio::ip::tcp::acceptor listen_on_loopback(
 /// ma wciąż robotę i proces nie kończy pracy, mimo że nie ma już czego przyjmować.
 boost::asio::awaitable<void> accept_connections(
     std::shared_ptr<boost::asio::ip::tcp::acceptor> acceptor,
-    TicketVerifier& tickets,
-    SessionRegistry& registry);
+    MatchServices& services);
 
 } // namespace gs

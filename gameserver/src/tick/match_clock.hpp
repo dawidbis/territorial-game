@@ -11,16 +11,22 @@
 namespace gs
 {
 
-/// Częstotliwości z D3: symulacja 10 Hz, wysyłka 5 Hz.
+/// Symulacja 10 Hz, wysyłka **też 10 Hz**.
 ///
-/// Rozdzielenie nie jest optymalizacją dla samej siebie — sim 10 Hz daje granularność
-/// ekonomii, a wysyłka co drugi tik połowi ruch i przy okazji deduplikuje zmiany:
-/// kafelek, który zmienił właściciela dwa razy w oknie, jedzie raz.
+/// D3 dokumentu architektury mówi „send 5 Hz" i to **świadome odstępstwo**: klient animuje
+/// przejmowanie kafelków, a animacja odtwarza to, co przyszło ostatnią paczką. Przy wysyłce
+/// co drugi tik ruch frontu docierał skokami po 200 ms, więc animacja albo zostawała w tyle
+/// o pół kroku, albo musiała zgadywać przyszłość.
+///
+/// Cena jest realna i policzona: znika naturalna deduplikacja (kafelek przejęty dwa razy
+/// w oknie jechał raz) i podwaja się liczba ramek. Sam wolumen kafelków rośnie mniej niż
+/// dwukrotnie — zmiany na tik są te same, dzielą się tylko na więcej paczek — ale narzut
+/// nagłówka ramki i `PublicState` już tak. Wrócić do `2` to jedna linia.
 struct TickRates
 {
     std::chrono::milliseconds sim_period{100};
 
-    std::uint32_t send_every = 2;
+    std::uint32_t send_every = 1;
 };
 
 struct Tick
@@ -61,7 +67,7 @@ public:
     /// czasie rzeczywistym, a strata jest policzona i widoczna w <see cref="skipped"/>.
     static constexpr std::uint32_t max_catch_up = 5;
 
-    MatchClock(boost::asio::any_io_executor executor, TickRates rates);
+    MatchClock(const boost::asio::any_io_executor& executor, TickRates rates);
 
     /// Czeka do najbliższego terminu i oddaje tik.
     ///
