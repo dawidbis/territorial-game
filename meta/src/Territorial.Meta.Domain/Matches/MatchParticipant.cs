@@ -53,4 +53,20 @@ public sealed class MatchParticipant
     public Nickname Nickname { get; private set; }
 
     public HsvColor Color { get; private set; }
+
+    /// <summary>
+    /// Chwila jawnego opuszczenia meczu; <c>null</c>, dopóki gracz w nim jest.
+    /// </summary>
+    /// <remarks>
+    /// Wiersz **zostaje** — gracz był w tym meczu i historia ma to pokazywać. Znika za to
+    /// z odpowiedzi na pytanie „w czym gram" i przestaje dostawać bilety, więc wyjście jest
+    /// nieodwracalne. Slotu nie zwalniamy: proces meczu wciąż nim dysponuje, a terytorium
+    /// zajęte przez gracza nie przestaje istnieć dlatego, że ten zamknął przeglądarkę.
+    /// </remarks>
+    public DateTimeOffset? LeftAt { get; private set; }
+
+    public bool HasLeft => LeftAt is not null;
+
+    /// <summary>Odnotowuje wyjście. Powtórne wywołanie nic nie zmienia — liczy się pierwsze.</summary>
+    internal void Leave(DateTimeOffset now) => LeftAt ??= now;
 }

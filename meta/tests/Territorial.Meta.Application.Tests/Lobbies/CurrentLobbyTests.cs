@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Time.Testing;
 using Territorial.Meta.Application.Lobbies;
+using Territorial.Meta.Application.Matches;
 using Territorial.Meta.Domain.Lobbies;
 using Territorial.Meta.Domain.Players;
 
@@ -22,8 +23,10 @@ public class CurrentLobbyTests
         public MapDefinition ForNextLobby() => new("moon", "Moon", MaxActors: 100);
     }
 
-    private static (CurrentLobby Lobby, FakeTimeProvider Time) Create(bool countdown = false)
-    {
+    private static (CurrentLobby Lobby, FakeTimeProvider Time) Create(
+        bool countdown = false,
+        bool fillWithBots = true
+    ){
         var time = new FakeTimeProvider(Start);
 
         var lobby = new CurrentLobby(
@@ -34,7 +37,8 @@ public class CurrentLobbyTests
                 GatheringSeconds = WindowSeconds,
                 CountdownEnabled = countdown,
                 DisconnectGraceSeconds = GraceSeconds,
-            }
+            },
+            new MatchOptions { FillWithBots = fillWithBots }
         );
 
         return (lobby, time);
@@ -239,6 +243,24 @@ public class CurrentLobbyTests
         reopened.Header.LobbyId.ShouldNotBe(started.Header.LobbyId);
         reopened.Header.State.ShouldBe(nameof(LobbyState.Gathering));
         reopened.Header.PlayerCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Header_PromisesBotsOnlyWhenTheMatchWillActuallyPlaceThem()
+    {
+        var (withBots, _) = Create();
+        JoinPlayer(withBots, "c1", "Alice");
+
+        // Mapa mieści stu aktorów, więc dziewięćdziesięciu dziewięciu dopełni boty.
+        withBots.Snapshot().Header.BotCount.ShouldBe(99);
+
+        var (withoutBots, _) = Create(fillWithBots: false);
+        JoinPlayer(withoutBots, "c1", "Alice");
+
+        // Liczba botów w nagłówku jest zapowiedzią. Zapowiedź niezgodna z tym, co postawi
+        // proces meczu, jest gorsza od jej braku — gracz liczy na dziewięćdziesięciu
+        // dziewięciu przeciwników i wchodzi na pustą mapę.
+        withoutBots.Snapshot().Header.BotCount.ShouldBe(0);
     }
 
     [Fact]

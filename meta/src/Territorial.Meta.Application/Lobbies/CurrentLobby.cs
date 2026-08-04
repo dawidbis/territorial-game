@@ -54,6 +54,18 @@ public sealed class CurrentLobby
     private readonly IMapCatalog maps;
     private readonly TimeProvider timeProvider;
     private readonly LobbyOptions options;
+
+    /// <summary>
+    /// Czy mecz dopełni obsadę botami.
+    /// </summary>
+    /// <remarks>
+    /// Ustawienie meczu, a nie lobby — i tak ma zostać. Lobby czyta je wyłącznie po to, żeby
+    /// nagłówek nie obiecywał dziewięćdziesięciu dziewięciu przeciwników, których proces
+    /// meczu nie postawi: liczba botów w lobby jest **zapowiedzią**, a zapowiedź niezgodna
+    /// z tym, co się dzieje po starcie, jest gorsza od jej braku.
+    /// </remarks>
+    private readonly bool fillWithBots;
+
     private readonly TimeSpan disconnectGrace;
 
     private Lobby lobby;
@@ -61,11 +73,19 @@ public sealed class CurrentLobby
     /// <summary>Czy od ostatniego rozgłoszenia zmieniło się cokolwiek, co widzą gracze.</summary>
     private bool dirty;
 
-    public CurrentLobby(IMapCatalog maps, TimeProvider timeProvider, LobbyOptions options)
-    {
+    public CurrentLobby(
+        IMapCatalog maps,
+        TimeProvider timeProvider,
+        LobbyOptions options,
+        MatchOptions matchOptions
+    ){
+        ArgumentNullException.ThrowIfNull(matchOptions);
+
         this.maps = maps;
         this.timeProvider = timeProvider;
         this.options = options;
+
+        fillWithBots = matchOptions.FillWithBots;
 
         disconnectGrace = TimeSpan.FromSeconds(options.DisconnectGraceSeconds);
         lobby = OpenNext(timeProvider.GetUtcNow());
@@ -298,7 +318,7 @@ public sealed class CurrentLobby
             lobby.Mode.ToString(),
             lobby.HumanCount,
             lobby.Map.MaxActors,
-            lobby.BotCount,
+            fillWithBots ? lobby.BotCount : 0,
             lobby.StartsAt,
             lobby.StartsAt is null ? (int)Math.Round(lobby.GatheringWindow.TotalSeconds) : null,
             timeProvider.GetUtcNow()

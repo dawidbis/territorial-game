@@ -112,9 +112,38 @@ public sealed class Match
     /// wywołaniu, bo odpowiedź jest jedna: bez slotu bilet nie ma sensu, a bez uczestnictwa
     /// nie ma slotu.
     /// </remarks>
-    /// <returns><c>null</c>, gdy gracz nie gra w tym meczu.</returns>
+    /// <returns><c>null</c>, gdy gracz nie gra w tym meczu — także wtedy, gdy z niego wyszedł.</returns>
     public MatchParticipant? ParticipantOf(Guid playerId) =>
-        participants.Find(p => p.PlayerId == playerId);
+        participants.Find(p => p.PlayerId == playerId && !p.HasLeft);
+
+    /// <summary>
+    /// Odnotowuje jawne wyjście gracza z meczu.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Wyjście jest <b>nieodwracalne</b>: od tej chwili gracz nie dostanie już biletu do tego
+    /// meczu, a pytanie „w czym gram" przestaje go tu widzieć. Tak ma być — inaczej przycisk
+    /// „opuść mecz" byłby wyłącznie schowaniem okna, a gracz wracałby do rozgrywki przy
+    /// pierwszym odświeżeniu strony.
+    /// </para>
+    /// <para>
+    /// Slot zostaje zajęty i to <b>nie jest</b> przeoczenie: proces meczu prowadzi go dalej,
+    /// terytorium nie znika, a boty nie dostają zwolnionego miejsca w połowie rozgrywki.
+    /// Meta odnotowuje wyłącznie to, że ten człowiek już nie wróci.
+    /// </para>
+    /// </remarks>
+    /// <returns><c>false</c>, gdy gracz nie jest uczestnikiem albo wyszedł już wcześniej.</returns>
+    public bool Leave(Guid playerId, DateTimeOffset now)
+    {
+        if (participants.Find(p => p.PlayerId == playerId) is not { HasLeft: false } participant)
+        {
+            return false;
+        }
+
+        participant.Leave(now);
+
+        return true;
+    }
 
     /// <summary>
     /// Zakłada mecz dla zamrożonego rostera i przypisuje sloty.
@@ -186,6 +215,32 @@ public sealed class Match
         WsUrl = wsUrl;
         State = MatchState.Live;
         StartedAt = now;
+    }
+
+    /// <summary>
+    /// Odnotowuje koniec meczu: proces zgasł i nie ma już dokąd wpuszczać graczy.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Świadomie <b>nie rzuca</b> przy meczu w innym stanie. Wołane jest z obserwacji cyklu
+    /// życia procesu, a ta bywa spóźniona i bywa powtórzona: mecz mógł już zostać zamknięty
+    /// odbiorem wyniku albo nigdy nie wyjść z alokacji. W obu przypadkach „już zamknięty" nie
+    /// jest błędem, tylko normalnym wyścigiem.
+    /// </para>
+    /// <para>
+    /// Nie zapisuje wyniku — to osobna ścieżka (plan alokacji, etap 4). Tutaj chodzi
+    /// wyłącznie o to, żeby meta przestała wydawać bilety do procesu, którego nie ma.
+    /// </para>
+    /// </remarks>
+    public void MarkCompleted(DateTimeOffset now)
+    {
+        if (State is not MatchState.Live)
+        {
+            return;
+        }
+
+        State = MatchState.Completed;
+        EndedAt = now;
     }
 
     /// <summary>

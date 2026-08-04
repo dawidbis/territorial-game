@@ -26,5 +26,24 @@ public interface IMatchRepository
     /// </remarks>
     Task<IReadOnlyList<Match>> GetAllocatingAsync(CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Żywy mecz, w którym gra ten gracz — albo <c>null</c>, gdy w żadnym nie gra.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Pytanie zadaje klient przy każdym wejściu do aplikacji: mecz jest stanem wyłącznym,
+    /// więc gracz z trwającym meczem ma do niego wrócić, a nie oglądać lobby. Bez tego
+    /// zapytania wiedza o meczu ginie razem z pamięcią karty, a odświeżenie strony gdziekolwiek
+    /// poza adresem meczu wyglądałoby jak wypisanie z rozgrywki.
+    /// </para>
+    /// <para>
+    /// Uczestnicy dociągani, bo wołający i tak potrzebuje slotu do wystawienia biletu.
+    /// Teoretycznie graczy może być w kilku meczach naraz — praktycznie nie, bo lobby
+    /// przyjmuje jedno wejście, a mecze kończą się same. Bierzemy najnowszy i nie udajemy,
+    /// że rozstrzygamy tu regułę, której nikt jeszcze nie potrzebował.
+    /// </para>
+    /// </remarks>
+    Task<Match?> GetLiveForPlayerAsync(Guid playerId, CancellationToken cancellationToken);
+
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }

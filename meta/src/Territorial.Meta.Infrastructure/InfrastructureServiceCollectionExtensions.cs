@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Territorial.Meta.Application.Lobbies;
 using Territorial.Meta.Application.Matches;
 using Territorial.Meta.Application.Players;
@@ -27,10 +28,37 @@ public static class InfrastructureServiceCollectionExtensions
         // Katalog map jest bezstanowy i wpisany na sztywno, więc singleton.
         services.AddSingleton<IMapCatalog, InMemoryMapCatalog>();
 
-        // Atrapa alokatora — dopóki nie ma binarki game-serwera, nie ma czego uruchamiać.
-        // Podmiana na LocalProcessMatchAllocator albo AgentMatchAllocator dotyka tej jednej
-        // linii; reszta systemu widzi wyłącznie IMatchAllocator.
-        services.AddSingleton<IMatchAllocator, FakeMatchAllocator>();
+        // Alokator wybierany konfiguracją, a nie środowiskiem: brak zbudowanej binarki C++
+        // nie ma zamieniać dev-a w serwis, w którym każde lobby kończy się awarią. Reszta
+        // systemu i tak widzi wyłącznie IMatchAllocator.
+        services.AddSingleton<IMatchAllocator>(provider =>
+        {
+            var matchOptions = provider.GetRequiredService<MatchOptions>();
+
+            if (matchOptions.UsesLocalProcess)
+            {
+                return new LocalProcessMatchAllocator(
+                    matchOptions,
+                    provider.GetRequiredService<MatchEndChannel>(),
+                    provider.GetRequiredService<ILogger<LocalProcessMatchAllocator>>()
+                );
+            }
+
+            if (
+                !string.Equals(
+                    matchOptions.Allocator,
+                    MatchOptions.FakeAllocator,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            ){
+                throw new InvalidOperationException(
+                    $"Match:Allocator ma wartość '{matchOptions.Allocator}', a znane są "
+                        + $"'{MatchOptions.FakeAllocator}' i '{MatchOptions.LocalProcessAllocator}'."
+                );
+            }
+
+            return new FakeMatchAllocator(matchOptions);
+        });
 
         return services;
     }

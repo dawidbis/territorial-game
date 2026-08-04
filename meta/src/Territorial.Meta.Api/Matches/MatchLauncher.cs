@@ -135,11 +135,14 @@ public sealed partial class MatchLauncher(
         Match match,
         CancellationToken cancellationToken
     ){
+        // Manifest budowany tutaj, a nie w alokatorze: to jedyna warstwa, która wie, co to
+        // jest nick i co to jest kolor gracza. Dla orkiestratora jest nieprzezroczysty.
         var request = new MatchAllocationRequest(
             match.Id,
             match.MapId,
             match.MaxActors,
-            match.Seed
+            match.Seed,
+            MatchManifest.For(match.Participants)
         );
 
         var attempts = Math.Max(1, options.AllocationAttempts);

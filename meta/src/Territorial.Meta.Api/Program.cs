@@ -59,6 +59,16 @@ if (
     );
 }
 
+// Alokator bez ścieżki do binarki nie ma czego uruchomić, a dowiedziałby się o tym dopiero
+// pierwsze lobby, które dobije do zera — czyli po minucie czekania stu graczy.
+if (matchOptions.UsesLocalProcess && string.IsNullOrWhiteSpace(matchOptions.GameServerPath))
+{
+    throw new InvalidOperationException(
+        "Match:Allocator ma wartość LocalProcess, ale Match:GameServerPath jest pusty. "
+            + "Wskaż zbudowaną binarkę game-serwera albo wróć na Match:Allocator = Fake."
+    );
+}
+
 #endregion
 
 #region CORS — jawna lista origin-ów, wymuszona przez SignalR
@@ -178,6 +188,12 @@ builder.Services.AddHostedService<LobbyClock>();
 builder.Services.AddSingleton<MatchStartChannel>();
 builder.Services.AddHostedService<MatchLauncher>();
 
+// Koniec meczu tą samą drogą co start: alokator melduje wyjście procesu do kanału, a osobna
+// usługa zamyka wiersz. Bez tego mecz zostaje `Live` na zawsze, a gracz wracający pod link
+// dostaje bilet do procesu, którego nie ma.
+builder.Services.AddSingleton<MatchEndChannel>();
+builder.Services.AddHostedService<MatchReaper>();
+
 // Porządki po poprzednim życiu procesu: mecze porzucone w trakcie alokacji.
 builder.Services.AddHostedService<StaleMatchSweeper>();
 
@@ -208,6 +224,38 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
     app.MapScalarApiReference();
+}
+
+// Teren dla klienta wyłącznie na czas braku CDN-u (§3.6 planu serwera gry). Ścieżka jest ta
+// sama co docelowa, więc klient nie zauważy przeprowadzki — zmieni się tylko host.
+if (app.Environment.IsDevelopment())
+{
+    app.MapGet(
+        "/maps/{mapId}/{contentHash}/terrain.bin",
+        (HttpContext context, string mapId) =>
+        {
+            // Segment z sumą kontrolną jest świadomie NIEZWIĄZANY i nieużywany przy szukaniu
+            // pliku: w dev istnieje jeden plik na mapę, a hash w ścieżce pełni tam wyłącznie
+            // rolę klucza cache'a przeglądarki — dokładnie tak jak na produkcji.
+            if (!mapId.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_'))
+            {
+                return Results.NotFound();
+            }
+
+            var path = Path.GetFullPath(Path.Combine(matchOptions.MapsRoot, $"{mapId}.tmap"));
+
+            if (!File.Exists(path))
+            {
+                return Results.NotFound();
+            }
+
+            // Nagłówki te same, które testuje się na produkcji: plik jest adresowany hashem,
+            // więc pod tym adresem jego zawartość nigdy się nie zmieni (D13).
+            context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+
+            return Results.File(path, "application/octet-stream");
+        }
+    );
 }
 
 app.MapControllers();

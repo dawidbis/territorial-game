@@ -36,6 +36,14 @@
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.10" />
   </ItemGroup>
 
+  <ItemGroup Label="Infrastruktura">
+    <!-- Referencja BEZPOŚREDNIA, mimo że EF Core i tak ciągnie logowanie przechodnio:
+         generator [LoggerMessage] jest analizatorem z tej paczki, a analizatory
+         z zależności przechodnich potrafią nie dojechać. Bez niego CA1848 nie da się
+         spełnić w tym projekcie. -->
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
+  </ItemGroup>
+
   <ItemGroup Label="Persystencja">
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10" />

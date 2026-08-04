@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -53,11 +54,15 @@ public class MatchLauncherTests
         /// <summary>Czy przy pierwszym wywołaniu mecz siedział już w bazie.</summary>
         public bool SawASavedMatch { get; private set; }
 
+        /// <summary>Ostatnie zlecenie — stąd sprawdza się, co orkiestrator dostał do ręki.</summary>
+        public MatchAllocationRequest? LastRequest { get; private set; }
+
         public Task<MatchAllocation> AllocateAsync(
             MatchAllocationRequest request,
             CancellationToken cancellationToken
         ){
             Calls++;
+            LastRequest = request;
 
             if (Calls == 1)
             {
@@ -96,7 +101,8 @@ public class MatchLauncherTests
         var lobby = new CurrentLobby(
             new StubMapCatalog(),
             time,
-            new LobbyOptions { GatheringSeconds = WindowSeconds, CountdownEnabled = true }
+            new LobbyOptions { GatheringSeconds = WindowSeconds, CountdownEnabled = true },
+            new MatchOptions()
         );
 
         var client = Substitute.For<ILobbyClient>();
@@ -231,6 +237,35 @@ public class MatchLauncherTests
         // Adres publiczny zapisany razem z wewnętrznym — z niego korzysta ponowne wydanie biletu.
         match.WsUrl.ShouldBe($"wss://gs.example.com/match/{match.Id}");
         match.Participants.ShouldHaveSingleItem().Slot.ShouldBe(ActorSlot.FirstActor);
+    }
+
+    /// <summary>
+    /// Roster nie ma jak dojść do procesu inaczej niż manifestem. Bez niego mecz wstaje
+    /// na samych botach i nikt tego nie zauważa aż do pierwszego <c>MatchInit</c>.
+    /// </summary>
+    [Fact]
+    public async Task Launch_HandsTheOrchestratorAManifestWithEveryHuman()
+    {
+        var fixture = CreateFixture();
+        var (start, _) = StartWith(fixture, "Alice", "Bob");
+
+        await fixture.Launcher.LaunchAsync(start, CancellationToken.None);
+
+        var manifest = fixture.Allocator.LastRequest.ShouldNotBeNull().Manifest;
+
+        var players = JsonDocument
+            .Parse(manifest)
+            .RootElement.GetProperty("players")
+            .EnumerateArray()
+            .ToArray();
+
+        players
+            .Select(player => player.GetProperty("name").GetString())
+            .ShouldBe(["Alice", "Bob"], ignoreOrder: true);
+
+        players
+            .Select(player => player.GetProperty("slot").GetByte())
+            .ShouldBe([(byte)1, (byte)2], ignoreOrder: true);
     }
 
     [Fact]

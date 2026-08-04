@@ -52,13 +52,108 @@ public class MatchesControllerTests
             ? new ClaimsIdentity([new Claim(JwtRegisteredClaimNames.Sub, id.ToString())], "test")
             : new ClaimsIdentity();
 
-        return new MatchesController(matches, TestTickets.For(options))
+        return new MatchesController(matches, TestTickets.For(options), TimeProvider.System)
         {
             ControllerContext = new ControllerContext
             {
                 HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(claims) },
             },
         };
+    }
+
+    /// <summary>
+    /// Mecz jest stanem wyłącznym, więc klient pyta o niego przy każdym wejściu do aplikacji.
+    /// Odpowiedź twierdząca zawsze kończy się wejściem do gry, dlatego niesie od razu bilet —
+    /// drugie żądanie po to samo byłoby wyłącznie opóźnieniem.
+    /// </summary>
+    [Fact]
+    public async Task GetMine_GivesTheLiveMatchWithATicket()
+    {
+        var playerId = Guid.CreateVersion7();
+        var match = LiveMatch(playerId);
+
+        var matches = Substitute.For<IMatchRepository>();
+        matches.GetLiveForPlayerAsync(playerId, Arg.Any<CancellationToken>()).Returns(match);
+
+        var response = await CreateController(matches, playerId).GetMine(CancellationToken.None);
+
+        var body = response
+            .Result.ShouldBeOfType<OkObjectResult>()
+            .Value.ShouldBeOfType<ActiveMatchResponse>();
+
+        body.MatchId.ShouldBe(match.Id);
+        body.Ticket.ShouldNotBeNullOrWhiteSpace();
+        body.WsUrl.ShouldBe(WsUrl);
+        body.ExpiresAt.ShouldBeGreaterThan(DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>
+    /// Wyjście zamyka drogę powrotną: ten sam gracz nie dostanie już biletu do tego meczu.
+    /// Bez tego przycisk „opuść mecz" byłby wyłącznie schowaniem okna.
+    /// </summary>
+    [Fact]
+    public async Task Leave_ClosesTheDoorBehindThePlayer()
+    {
+        var playerId = Guid.CreateVersion7();
+        var match = LiveMatch(playerId);
+
+        var matches = Substitute.For<IMatchRepository>();
+        matches.GetAsync(match.Id, Arg.Any<CancellationToken>()).Returns(match);
+
+        var controller = CreateController(matches, playerId);
+
+        (await controller.Leave(match.Id, CancellationToken.None)).ShouldBeOfType<NoContentResult>();
+
+        await matches.Received().SaveChangesAsync(Arg.Any<CancellationToken>());
+
+        var afterwards = await controller.IssueTicket(match.Id, CancellationToken.None);
+
+        afterwards.Result.ShouldBeOfType<NotFoundResult>();
+    }
+
+    [Fact]
+    public async Task Leave_IsNotFoundWhenThePlayerIsNotInThatMatch()
+    {
+        var match = LiveMatch(Guid.CreateVersion7());
+
+        var matches = Substitute.For<IMatchRepository>();
+        matches.GetAsync(match.Id, Arg.Any<CancellationToken>()).Returns(match);
+
+        var response = await CreateController(matches, Guid.CreateVersion7())
+            .Leave(match.Id, CancellationToken.None);
+
+        response.ShouldBeOfType<NotFoundResult>();
+    }
+
+    [Fact]
+    public async Task GetMine_IsNotFoundForSomebodyWhoPlaysInNothing()
+    {
+        var matches = Substitute.For<IMatchRepository>();
+        matches
+            .GetLiveForPlayerAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns((Match?)null);
+
+        var response = await CreateController(matches, Guid.CreateVersion7())
+            .GetMine(CancellationToken.None);
+
+        // Najczęstsza odpowiedź w całym systemie: większość graczy nie gra w tej chwili
+        // w niczym, a 404 jest tu zwykłym „nie", nie ukrywaniem czyichkolwiek danych.
+        response.Result.ShouldBeOfType<NotFoundResult>();
+    }
+
+    [Fact]
+    public async Task GetMine_WithoutIdentity_DoesNotTouchTheDatabase()
+    {
+        var matches = Substitute.For<IMatchRepository>();
+
+        var response = await CreateController(matches, playerId: null)
+            .GetMine(CancellationToken.None);
+
+        response.Result.ShouldBeOfType<UnauthorizedResult>();
+
+        await matches
+            .DidNotReceive()
+            .GetLiveForPlayerAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

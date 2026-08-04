@@ -40,6 +40,8 @@ internal sealed class MatchParticipantConfiguration : IEntityTypeConfiguration<M
             }
         );
 
+        builder.Property(p => p.LeftAt).HasColumnName("left_at");
+
         // Dwóch aktorów na jednym slocie to mecz, którego nie da się odtworzyć.
         // Reguła jest w domenie, ale unikalność w bazie kosztuje jeden indeks i zamyka
         // temat na wypadek błędu w przyszłej ścieżce zapisu.

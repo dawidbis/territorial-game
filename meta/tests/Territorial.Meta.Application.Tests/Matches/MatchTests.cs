@@ -29,6 +29,42 @@ public class MatchTests
     private static IReadOnlyList<LobbyPlayer> Roster(params string[] nicknames) =>
         [.. nicknames.Select((nickname, index) => Someone(nickname, nicknames.Length - index))];
 
+    /// <summary>
+    /// Wyjście z meczu jest nieodwracalne — na tym stoi cała jego jawność. Gdyby uczestnik
+    /// dawał się znaleźć po wyjściu, dostałby kolejny bilet i wróciłby do rozgrywki przy
+    /// pierwszym odświeżeniu strony, a przycisk „opuść mecz" byłby schowaniem okna.
+    /// </summary>
+    [Fact]
+    public void Leave_MakesTheParticipantUnfindable_ButKeepsTheirRow()
+    {
+        var roster = Roster("Alice");
+        var playerId = roster[0].PlayerId;
+
+        var match = Match.Create(Moon, GameMode.Ffa, Seed, roster, Now);
+
+        match.Leave(playerId, Now).ShouldBeTrue();
+
+        match.ParticipantOf(playerId).ShouldBeNull();
+
+        // Wiersz zostaje: gracz BYŁ w tym meczu i historia ma to pokazywać. Slot też zostaje
+        // zajęty, bo proces meczu prowadzi jego aktora dalej i terytorium nie znika.
+        match.Participants.ShouldHaveSingleItem().HasLeft.ShouldBeTrue();
+        match.HumanCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public void Leave_IsFalseForSomebodyWhoAlreadyLeftOrNeverPlayed()
+    {
+        var roster = Roster("Alice");
+
+        var match = Match.Create(Moon, GameMode.Ffa, Seed, roster, Now);
+
+        match.Leave(roster[0].PlayerId, Now).ShouldBeTrue();
+
+        match.Leave(roster[0].PlayerId, Now).ShouldBeFalse();
+        match.Leave(Guid.CreateVersion7(), Now).ShouldBeFalse();
+    }
+
     [Fact]
     public void Create_GivesHumansConsecutiveSlotsInRosterOrder()
     {
@@ -167,5 +203,31 @@ public class MatchTests
 
         match.State.ShouldBe(MatchState.Failed);
         match.EndedAt.ShouldBe(Now);
+    }
+
+    [Fact]
+    public void MarkCompleted_ClosesALiveMatchWhenItsProcessIsGone()
+    {
+        var match = Match.Create(Moon, GameMode.Ffa, Seed, Roster("Alice"), Now);
+        match.MarkLive("10.0.0.7:5101", WsUrl, Now);
+
+        match.MarkCompleted(Now);
+
+        // Od tej chwili meta nie wydaje już do niego biletów — a to jest cały cel tej ścieżki.
+        match.State.ShouldBe(MatchState.Completed);
+        match.EndedAt.ShouldBe(Now);
+    }
+
+    [Fact]
+    public void MarkCompleted_IsQuietWhenTheMatchWasNeverLive()
+    {
+        var match = Match.Create(Moon, GameMode.Ffa, Seed, Roster("Alice"), Now);
+
+        // Notyfikacja o wyjściu procesu bywa spóźniona i bywa powtórzona: mecz, który nigdy
+        // nie wyszedł z alokacji, ma zostać przy swoim stanie, a nie udawać rozegranego.
+        match.MarkCompleted(Now);
+
+        match.State.ShouldBe(MatchState.Allocating);
+        match.EndedAt.ShouldBeNull();
     }
 }
