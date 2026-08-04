@@ -15,8 +15,13 @@
         analizator dojdzie do naszego kodu.
       * `-Wno-unused-command-line-argument` — clang nie zna kilku przełączników MSVC
         (`/external:anglebrackets`) i domyślnie robi z tego błąd.
-      * `--warnings-as-errors=*` — inaczej znaleziska idą na wyjście, a kod wyjścia zostaje
-        zerowy i CI świeci na zielono nad ostrzeżeniem.
+    O wyniku decyduje **ścieżka znaleziska, a nie kod wyjścia clang-tidy**. Powód wyszedł
+    z pierwszego przebiegu w CI: `--warnings-as-errors=*` podnosi ostrzeżenie do błędu,
+    a błędy **omijają `HeaderFilterRegex`** — więc diagnostyka, której miejscem jest nagłówek
+    standardowej biblioteki Microsoftu (`xutility` woła nasz komparator w swojej specyfikacji
+    `noexcept`), wywracała budowę i nie dało się jej odfiltrować niczym poza wyłączeniem całej
+    reguły. Tutaj liczą się wyłącznie znaleziska wskazujące na `gameserver/src` albo
+    `gameserver/tools`, czyli na kod, który mamy jak poprawić.
 
 .PARAMETER BuildDir
     Katalog budowy z `compile_commands.json` (preset windows-ninja albo dowolny z Ninja).
@@ -74,16 +79,18 @@ Write-Host "plików: $($files.Count), katalog budowy: $BuildDir"
 $arguments = @(
     "-p", $BuildDir,
     "--quiet",
-    "--warnings-as-errors=*",
     "--extra-arg=-D_CRT_USE_BUILTIN_OFFSETOF",
     "--extra-arg=-Wno-unused-command-line-argument"
 )
 
+# Linia diagnostyki wskazująca na **nasz** plik. Notatki (`note:`) celowo się nie liczą:
+# przy znalezisku w cudzym nagłówku to one wskazują nasz kod, a poprawić trzeba tamten.
+$ourFinding = '[\\/]gameserver[\\/](src|tools)[\\/].*:\d+:\d+: (warning|error):'
+
 # Od tego miejsca błędy nie są przerywające i to **jest konieczne**: clang-tidy wypisuje na
 # standardowe wyjście błędów podsumowanie „N warnings generated" nawet przy czystym przebiegu,
 # a PowerShell zamienia każdą taką linię w rekord błędu. Przy `Stop` skrypt kończyłby się na
-# pierwszym pliku i meldował sukces analizy, której nie zrobił. O wyniku decyduje wyłącznie kod
-# wyjścia procesu.
+# pierwszym pliku i meldował sukces analizy, której nie zrobił.
 $ErrorActionPreference = "Continue"
 
 # Wyjście analizatora zbierane jest w całości i wypisywane dopiero na końcu: przy przebiegu
@@ -96,18 +103,26 @@ if ($PSVersionTable.PSVersion.Major -ge 7 -and $Jobs -gt 1) {
 
         $output = & $using:tidy @using:arguments $_ 2>&1 | Where-Object { $_ -notmatch $using:noise }
 
-        [pscustomobject]@{ File = $_; Failed = ($LASTEXITCODE -ne 0); Output = $output }
+        [pscustomobject]@{
+            File = $_
+            Findings = @($output | Where-Object { $_ -match $using:ourFinding })
+            Output = $output
+        }
     }
 }
 else {
     $results = $files | ForEach-Object {
         $output = & $tidy @arguments $_ 2>&1 | Where-Object { $_ -notmatch $noise }
 
-        [pscustomobject]@{ File = $_; Failed = ($LASTEXITCODE -ne 0); Output = $output }
+        [pscustomobject]@{
+            File = $_
+            Findings = @($output | Where-Object { $_ -match $ourFinding })
+            Output = $output
+        }
     }
 }
 
-$broken = @($results | Where-Object { $_.Failed })
+$broken = @($results | Where-Object { $_.Findings.Count -gt 0 })
 
 foreach ($result in $broken) {
     Write-Host ""
@@ -116,8 +131,10 @@ foreach ($result in $broken) {
 }
 
 if ($broken.Count -gt 0) {
+    $total = ($broken | ForEach-Object { $_.Findings.Count } | Measure-Object -Sum).Sum
+
     Write-Host ""
-    Write-Host "clang-tidy: znaleziska w $($broken.Count) plikach." -ForegroundColor Red
+    Write-Host "clang-tidy: $total znalezisk w $($broken.Count) plikach." -ForegroundColor Red
 
     exit 1
 }

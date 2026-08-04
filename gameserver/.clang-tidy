@@ -31,7 +31,6 @@ Checks: >
   -readability-math-missing-parentheses,
   -readability-identifier-length,
   -readability-magic-numbers,
-  -readability-suspicious-call-argument,
   -readability-uppercase-literal-suffix
 
 # Powody wyłączeń, po kolei:
@@ -89,13 +88,14 @@ Checks: >
 #   ma już nazwę i komentarz z powodem tam, gdzie to cokolwiek daje; reszta to wykładniki
 #   wzorów, których wyciąganie do stałych zaciemniłoby wzór.
 #
-# readability-suspicious-call-argument — heurystyka „te dwa argumenty wyglądają na zamienione",
-#   porównująca nazwy parametrów. Trafia w komparator kolejki podboju: standardowa biblioteka
-#   Microsoftu woła go z `_Right, _Left` w swoim sprawdzeniu spójności, a nasze parametry
-#   nazywają się `left` i `right`. Zgłoszenie wypada w cudzym nagłówku, więc nie da się go
-#   odfiltrować po ścieżce, a sam komparator jest poprawny i ma na to test.
-#
 # readability-uppercase-literal-suffix — `1u` kontra `1U`. Nie ma opinii wartej czerwonego CI.
+#
+# **Reguł, które trafiają w cudze nagłówki, nie wyłączamy.** Standardowa biblioteka Microsoftu
+# potrafi wywołać nasz komparator w swojej specyfikacji `noexcept` i dostać za to `warning`
+# w `xutility` — z notatką wskazującą nasz kod. Wyłączanie za to całych reguł kosztowałoby
+# kolejną przy każdej aktualizacji Visual Studio, więc `run-clang-tidy.ps1` decyduje o wyniku
+# po **ścieżce znaleziska**: liczy się to, co wskazuje na `gameserver/src` i `gameserver/tools`.
+# `HeaderFilterRegex` tego nie załatwia, bo diagnostyka podniesiona do błędu go omija.
 
 # Wyłącznie nasze nagłówki. Boost, protobuf i OpenSSL nie są nasze do poprawiania, a kod
 # generowany z `game.proto` powstaje w katalogu budowania.

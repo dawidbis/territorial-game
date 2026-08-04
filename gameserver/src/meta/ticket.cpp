@@ -373,7 +373,7 @@ std::expected<Ticket, TicketError> TicketVerifier::verify(
 
     const std::int64_t slot_number = slot->get_int64();
 
-    if (slot_number < 1 || slot_number > static_cast<std::int64_t>(max_actors_))
+    if (slot_number < 1 || std::cmp_greater(slot_number, max_actors_))
     {
         return std::unexpected(TicketError::bad_slot);
     }

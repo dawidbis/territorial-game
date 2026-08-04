@@ -13,6 +13,7 @@
 #include <fstream>
 #include <ios>
 #include <sstream>
+#include <utility>
 #include <vector>
 
 namespace gs::tmapgen
@@ -218,7 +219,8 @@ std::expected<Metadata, std::string> parse_metadata(std::string_view json)
         const std::int64_t x = entry.get_array()[0].get_int64();
         const std::int64_t y = entry.get_array()[1].get_int64();
 
-        if (x < 0 || y < 0 || x > tmap::max_dimension || y > tmap::max_dimension)
+        if (x < 0 || y < 0 || std::cmp_greater(x, tmap::max_dimension)
+            || std::cmp_greater(y, tmap::max_dimension))
         {
             return std::unexpected(std::format(
                 "Punkt startowy {} stoi na [{}, {}], a współrzędne mieszczą się w 0..{}.",

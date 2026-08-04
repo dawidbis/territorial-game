@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <utility>
 
 namespace gs
 {
@@ -203,7 +204,8 @@ bool World::place_actor(std::uint8_t slot)
 
         // Bez zawijania: dysk przy krawędzi mapy jest przycięty, a nie przeniesiony na
         // drugą stronę świata.
-        if (x < 0 || y < 0 || x >= static_cast<int>(width_) || y >= static_cast<int>(height_))
+        if (x < 0 || y < 0 || std::cmp_greater_equal(x, width_)
+            || std::cmp_greater_equal(y, height_))
         {
             continue;
         }

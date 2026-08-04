@@ -2200,12 +2200,22 @@ pwsh gameserver/tools/run-clang-tidy.ps1
 Zestaw reguł stoi w `gameserver/.clang-tidy` i jest **dobrany do tego kodu, a nie przepisany
 z katalogu**: każde wyłączenie ma zapisany powód. Reguła włączona „na wszelki wypadek", której
 nikt nie ma zamiaru spełniać, kończy się morzem `NOLINT` i analizatorem, którego wszyscy uczą się
-mijać wzrokiem. Pierwszy przebieg dał ponad dziewięćdziesiąt znalezisk — 62 z nich to dwie reguły
+mijać wzrokiem. Pierwszy przebieg lokalny dał ponad dziewięćdziesiąt znalezisk — 62 z nich to dwie reguły
 czysto stylistyczne (nawiasy wokół `y * width + x` i `auto` przy rzutowaniach), wyłączone
 z podanym uzasadnieniem, a **wszystkie pozostałe zostały naprawione**: stałe lokalne, których
 nikt nie zmienia, rzutowania rozszerzające założone na sumę zamiast na składnik, gołe tablice
 w parametrach, `std::log(2.0)` liczone przy starcie procesu zamiast w czasie kompilacji,
-kopiowany egzekutor z `std::move`, który nic nie przenosił, i dwa `main` bez obsługi wyjątku. CI puszcza analizator
+kopiowany egzekutor z `std::move`, który nic nie przenosił, i dwa `main` bez obsługi wyjątku.
+
+**O wyniku decyduje ścieżka znaleziska, a nie kod wyjścia clang-tidy** — i to jest wniosek
+z pierwszego przebiegu w CI, nie projekt z góry. Pierwotnie analizator chodził
+z `--warnings-as-errors=*`; okazało się, że **podniesienie ostrzeżenia do błędu omija
+`HeaderFilterRegex`**, więc diagnostyka, której miejscem jest nagłówek standardowej biblioteki
+Microsoftu, wywracała budowę i nie dało się jej wyciszyć niczym poza wyłączeniem całej reguły.
+Konkretnie: `xutility` wywołuje nasz komparator kolejki podboju w swojej specyfikacji `noexcept`
+i dostaje za to `readability-redundant-casting` — na kod, którego nie mamy jak poprawić.
+Wyłączanie za to reguł kosztowałoby kolejną przy każdej aktualizacji Visual Studio, więc skrypt
+liczy wyłącznie znaleziska wskazujące na `gameserver/src` i `gameserver/tools`. CI puszcza analizator
 z `--warnings-as-errors=*`, więc od teraz nowe znalezisko zatrzymuje budowę.
 
 Trzy rzeczy w tym uruchomieniu nie są oczywiste i każda kosztowałaby wieczór:
@@ -2230,10 +2240,13 @@ Trzy rzeczy w tym uruchomieniu nie są oczywiste i każda kosztowałaby wieczór
 Sprawdzane są `src/` i `tools/`, **nie testy**: makra GoogleTesta generują znaleziska stylistyczne,
 które są własnością frameworka, a nie nasze do poprawiania.
 
-> **Wersja clang-tidy na runnerze nie jest przypięta** i to jest świadomy koszt: nowszy LLVM
-> przynosi nowe reguły, więc pierwszy przebieg po podbiciu obrazu runnera może wskazać coś, czego
-> wcześniej nie było. Alternatywą byłoby instalowanie konkretnej wersji przy każdym przebiegu —
-> kilka minut na każdy push za to, żeby nie zobaczyć nowych podpowiedzi.
+> **Wersja clang-tidy na runnerze nie jest przypięta** i to jest świadomy koszt — który
+> zmaterializował się przy pierwszym przebiegu. Lokalnie analizator to LLVM 19 z Visual Studio,
+> na obrazie runnera LLVM 20 z własną instalacją, a przy `Checks: bugprone-*, modernize-*, …`
+> **każda nowa reguła włącza się sama**. Nowszy analizator znalazł siedem porównań mieszających
+> znak z brakiem znaku (`slot > static_cast<std::int64_t>(max_actors)` i podobne) i miał rację:
+> rzutowanie jest poprawne tylko dopóki zakresy się mieszczą, a `std::cmp_greater` jest poprawne
+> z definicji. Zamiast przypinać wersję, znaleziska zostały naprawione — po to ta bramka jest.
 
 #### Sanitizery: ASan i UBSan
 

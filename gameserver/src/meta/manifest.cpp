@@ -12,6 +12,7 @@
 #include <ios>
 #include <iostream>
 #include <sstream>
+#include <utility>
 
 namespace gs
 {
@@ -121,7 +122,11 @@ std::expected<std::vector<ManifestPlayer>, std::string> parse_manifest(
 
         // Slot zero to pustkowie, 255 to woda (D12) — jedno i drugie w rosterze znaczyłoby
         // aktora, którego kafelki są nie do odróżnienia od terenu.
-        if (slot < 1 || slot > static_cast<std::int64_t>(max_actors))
+        //
+        // `std::cmp_greater`, a nie rzutowanie: liczba z JSON-a jest ze znakiem, sufit bez
+        // znaku, a porównanie po rzutowaniu jest poprawne tylko dopóki zakresy się mieszczą.
+        // Wersja z `cmp_` jest poprawna z definicji i nie wymaga tego sprawdzać.
+        if (slot < 1 || std::cmp_greater(slot, max_actors))
         {
             return std::unexpected(std::format(
                 "Gracz {}: slot {} jest poza zakresem 1..{}.",
@@ -132,7 +137,7 @@ std::expected<std::vector<ManifestPlayer>, std::string> parse_manifest(
 
         const std::int64_t color = entry.at("colorRgb").get_int64();
 
-        if (color < 0 || color > max_color)
+        if (color < 0 || std::cmp_greater(color, max_color))
         {
             return std::unexpected(std::format(
                 "Gracz {}: kolor {} jest poza zakresem 0..{}.",
