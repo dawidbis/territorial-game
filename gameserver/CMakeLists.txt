@@ -37,13 +37,24 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # wystawia i nic na tym nie traci — czyta projekt wprost.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Modułów C++20 tu nie ma i nie planujemy ich, a skanowanie w ich poszukiwaniu kosztuje
+# przy każdej budowie i dokłada do `compile_commands.json` argument `@...modmap`, którego
+# clang-tidy nie rozumie — czyli psuje jedyne narzędzie, dla którego ten plik powstaje.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 # Zależności przychodzą z vcpkg w trybie manifestowym (vcpkg.json obok tego pliku).
 find_package(protobuf CONFIG REQUIRED)
 find_package(Boost CONFIG REQUIRED COMPONENTS asio beast json)
 
 # Tylko libcrypto: TLS terminuje proxy (D9), więc proces nie ma żadnego powodu, żeby
-# umieć rozmawiać po SSL-u. Z OpenSSL-a używamy wyłącznie weryfikacji podpisu biletu.
+# umieć rozmawiać po SSL-u. Z OpenSSL-a używamy weryfikacji podpisu biletu i SHA-256
+# pliku terenu (D13).
 find_package(OpenSSL REQUIRED)
+
+# Wyłącznie dla `tmapgen`: dane obrazu w PNG to strumień deflate i nic poza zlib go nie
+# rozpakuje. Wpisany wprost, mimo że dochodzi też tranzytywnie z protobufem — zależność,
+# której się używa, ma być widoczna w manifeście.
+find_package(ZLIB REQUIRED)
 
 # Ostrzeżenia są błędami — tak samo jak analizatory po stronie .NET. Nagłówki obcych
 # bibliotek są z tego wyłączone, bo nie mamy jak ich poprawić.
@@ -64,6 +75,74 @@ else()
     set(GAMESERVER_DETERMINISM -ffp-contract=off -fno-fast-math)
 endif()
 
+# ─────────────────────────── Sanitizery ───────────────────────────
+
+# Lista sanitizerów oddzielona średnikami, np. „address;undefined". Puste (domyślne) znaczy
+# zwykłą budowę — presety `linux-gcc-sanitizers` i `windows-ninja-asan` podstawiają tu wartość.
+#
+# Sanitizery znajdują dokładnie tę klasę błędów, której **nie widzi żaden test jednostkowy
+# tego projektu**: dostęp do zwolnionej ramki korutyny, wiszącą referencję w `MatchServices`,
+# indeks kafelka poza tablicą i przepełnienie ze znakiem. Cały ten kod stoi na cudzych
+# czasach życia opisanych w komentarzach — a komentarz nie jest egzekwowalny.
+set(GAMESERVER_SANITIZERS "" CACHE STRING "Sanitizery: address, undefined (średnik jako separator)")
+
+set(GAMESERVER_SANITIZER_FLAGS "")
+
+if(GAMESERVER_SANITIZERS)
+    string(REPLACE ";" "," GAMESERVER_SANITIZER_LIST "${GAMESERVER_SANITIZERS}")
+
+    if(MSVC)
+        # MSVC ma wyłącznie ASan i nie przyjmuje listy — UBSan po tej stronie nie istnieje.
+        if(NOT GAMESERVER_SANITIZER_LIST STREQUAL "address")
+            message(FATAL_ERROR
+                "MSVC obsługuje tylko sanitizer 'address', a dostał '${GAMESERVER_SANITIZER_LIST}'. "
+                "UBSan chodzi na Linuksie — użyj presetu linux-gcc-sanitizers."
+            )
+        endif()
+
+        # /INCREMENTAL:NO, bo linker przyrostowy nie współpracuje z ASan i mówi o tym dopiero
+        # przy konsolidacji.
+        #
+        # /wd4714 wyłącza „funkcja oznaczona __forceinline nie została umieszczona
+        # śródwierszowo" — pod ASan MSVC przestaje wstawiać setery z kodu generowanego przez
+        # protobuf. To ostrzeżenie o cudzym kodzie, którego nie mamy jak poprawić, a przy /WX
+        # zatrzymuje budowę. `/external:W0` go nie łapie, bo `__forceinline` jest instancjonowany
+        # w naszej jednostce kompilacji.
+        set(GAMESERVER_SANITIZER_FLAGS /fsanitize=address /wd4714)
+
+        add_link_options(/INCREMENTAL:NO)
+    else()
+        # `-fno-sanitize-recover` zamienia znalezisko UBSan w niezerowy kod wyjścia. Bez tego
+        # test przechodzi mimo wypisanego naruszenia, a CI świeci na zielono nad błędem.
+        # `-fno-omit-frame-pointer` odzyskuje czytelny ślad stosu w raporcie.
+        set(GAMESERVER_SANITIZER_FLAGS
+            -fsanitize=${GAMESERVER_SANITIZER_LIST}
+            -fno-sanitize-recover=all
+            -fno-omit-frame-pointer)
+
+        add_link_options(-fsanitize=${GAMESERVER_SANITIZER_LIST})
+    endif()
+
+    message(STATUS "Sanitizery: ${GAMESERVER_SANITIZER_LIST}")
+endif()
+
+# Kod generowany z protobuf dostaje **tylko ASan**, nigdy UBSan.
+#
+# ASan musi go objąć, bo inaczej MSVC widzi adnotacje kontenerów w jednym pliku obiektowym,
+# a w drugim nie, i konsolidacja pada na LNK2038. UBSan nie ma tam czego pilnować: generator
+# protobufa rzutuje wartości z drutu na typy wyliczeniowe i robi arytmetykę na wskaźnikach
+# w sposób, którego nie mamy jak zmienić, a czerwone CI z powodu cudzego kodu uczy ludzi
+# wyłączać zadanie, a nie czytać raport.
+set(GAMESERVER_GENERATED_SANITIZER_FLAGS "")
+
+if(GAMESERVER_SANITIZERS)
+    if(MSVC)
+        set(GAMESERVER_GENERATED_SANITIZER_FLAGS ${GAMESERVER_SANITIZER_FLAGS})
+    elseif("address" IN_LIST GAMESERVER_SANITIZERS)
+        set(GAMESERVER_GENERATED_SANITIZER_FLAGS -fsanitize=address -fno-omit-frame-pointer)
+    endif()
+endif()
+
 # ─────────────────────────── Kontrakt sieciowy ───────────────────────────
 
 set(GAMESERVER_PROTO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../proto")
@@ -78,6 +157,9 @@ set_target_properties(game_proto PROPERTIES LINKER_LANGUAGE CXX)
 
 target_link_libraries(game_proto PUBLIC protobuf::libprotobuf)
 
+# Sam ASan, bez UBSan — powód przy definicji tej zmiennej.
+target_compile_options(game_proto PRIVATE ${GAMESERVER_GENERATED_SANITIZER_FLAGS})
+
 # SYSTEM, żeby ostrzeżenia z wygenerowanego kodu nie wywracały budowy przez /WX.
 target_include_directories(game_proto SYSTEM PUBLIC
     "$<BUILD_INTERFACE:${GAMESERVER_PROTO_GENERATED_DIR}>"
@@ -89,23 +171,51 @@ protobuf_generate(
     PROTOC_OUT_DIR "${GAMESERVER_PROTO_GENERATED_DIR}"
 )
 
+# ─────────────────────────── Format pliku mapy ───────────────────────────
+
+# Osobno od reszty serwera, bo ten sam nagłówek czyta proces meczu i zapisuje `tmapgen`.
+# Format z dwiema niezależnymi implementacjami rozjeżdża się przy pierwszej zmianie i wychodzi
+# to dopiero na produkcji. Bez Boosta i bez protobufa — konwerter nie ma powodu ich ciągnąć.
+add_library(tmap_format STATIC src/map/tmap.cpp)
+
+target_include_directories(tmap_format PUBLIC src)
+
+target_compile_options(tmap_format PRIVATE ${GAMESERVER_WARNINGS} ${GAMESERVER_DETERMINISM} ${GAMESERVER_SANITIZER_FLAGS})
+
 # ─────────────────────────── Serwer ───────────────────────────
 
 # Logika w bibliotece, `main` wyłącznie jako cienka warstwa — inaczej testy nie miałyby
 # się o co zaczepić.
 add_library(gameserver_core STATIC
-    src/app/options.cpp
     src/app/log.cpp
+    src/app/match_runner.cpp
+    src/app/options.cpp
+    src/app/startup.cpp
+    src/map/map_file.cpp
+    src/meta/manifest.cpp
     src/meta/ticket.cpp
+    src/net/commands.cpp
     src/net/listener.cpp
     src/net/session.cpp
+    src/net/session_registry.cpp
+    src/sim/attack.cpp
+    src/sim/economy.cpp
+    src/sim/rng.cpp
+    src/sim/roster.cpp
+    src/sim/simulation.cpp
+    src/sim/world.cpp
+    src/state/keyframe.cpp
+    src/state/match_intro.cpp
+    src/state/publisher.cpp
+    src/state/snapshot.cpp
     src/tick/match_clock.cpp
+    src/tick/match_lifetime.cpp
 )
 
 target_include_directories(gameserver_core PUBLIC src)
 
 target_link_libraries(gameserver_core
-    PUBLIC game_proto Boost::asio Boost::beast
+    PUBLIC game_proto tmap_format Boost::asio Boost::beast
     PRIVATE Boost::json OpenSSL::Crypto
 )
 
@@ -127,13 +237,36 @@ if(MSVC)
     )
 endif()
 
-target_compile_options(gameserver_core PRIVATE ${GAMESERVER_WARNINGS} ${GAMESERVER_DETERMINISM})
+target_compile_options(gameserver_core PRIVATE ${GAMESERVER_WARNINGS} ${GAMESERVER_DETERMINISM} ${GAMESERVER_SANITIZER_FLAGS})
 
 add_executable(gameserver src/main.cpp)
 
 target_link_libraries(gameserver PRIVATE gameserver_core)
 
-target_compile_options(gameserver PRIVATE ${GAMESERVER_WARNINGS} ${GAMESERVER_DETERMINISM})
+target_compile_options(gameserver PRIVATE ${GAMESERVER_WARNINGS} ${GAMESERVER_DETERMINISM} ${GAMESERVER_SANITIZER_FLAGS})
+
+# ─────────────────────────── tmapgen ───────────────────────────
+
+# Konwerter pary plików źródłowych (PNG + JSON) na `.tmap`. W tym samym projekcie co serwer,
+# żeby dzielić z nim nagłówek formatu — i tu też logika siedzi w bibliotece, bo walidacja map
+# jest dokładnie tym, co warto mieć pokryte testami.
+add_library(tmapgen_core STATIC
+    tools/tmapgen/convert.cpp
+    tools/tmapgen/png.cpp
+    tools/tmapgen/synthetic.cpp
+)
+
+target_include_directories(tmapgen_core PUBLIC tools/tmapgen)
+
+target_link_libraries(tmapgen_core PUBLIC tmap_format PRIVATE Boost::json ZLIB::ZLIB)
+
+target_compile_options(tmapgen_core PRIVATE ${GAMESERVER_WARNINGS} ${GAMESERVER_DETERMINISM} ${GAMESERVER_SANITIZER_FLAGS})
+
+add_executable(tmapgen tools/tmapgen/main.cpp)
+
+target_link_libraries(tmapgen PRIVATE tmapgen_core)
+
+target_compile_options(tmapgen PRIVATE ${GAMESERVER_WARNINGS} ${GAMESERVER_DETERMINISM} ${GAMESERVER_SANITIZER_FLAGS})
 
 # ─────────────────────────── Testy ───────────────────────────
 

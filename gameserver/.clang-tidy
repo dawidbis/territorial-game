@@ -1,0 +1,132 @@
+# Analizator statyczny serwera gry — odpowiednik ostrych analizatorów po stronie .NET.
+#
+# Zestaw jest **dobrany do tego kodu, a nie przepisany z katalogu**. Każde wyłączenie niżej ma
+# powód i ten powód jest zapisany: reguła włączona „na wszelki wypadek", której nikt nie ma
+# zamiaru spełniać, kończy się morzem `NOLINT` i analizatorem, którego wszyscy uczą się mijać
+# wzrokiem. Reguła włączona świadomie ma zatrzymywać budowę — i zatrzymuje, bo CI puszcza to
+# z `--warnings-as-errors=*`.
+#
+# Kod generowany z protobuf jest poza zasięgiem (`HeaderFilterRegex` obejmuje wyłącznie nasze
+# nagłówki), a nagłówki Boosta i OpenSSL-a nie są nasze do poprawiania.
+Checks: >
+  bugprone-*,
+  cert-*,
+  concurrency-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -clang-analyzer-*,
+  -bugprone-easily-swappable-parameters,
+  -cert-err58-cpp,
+  -misc-include-cleaner,
+  -misc-non-private-member-variables-in-classes,
+  -misc-use-anonymous-namespace,
+  -modernize-use-auto,
+  -modernize-use-nodiscard,
+  -modernize-use-trailing-return-type,
+  -modernize-use-designated-initializers,
+  -readability-function-cognitive-complexity,
+  -readability-math-missing-parentheses,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-suspicious-call-argument,
+  -readability-uppercase-literal-suffix
+
+# Powody wyłączeń, po kolei:
+#
+# clang-analyzer-* — analizator ścieżkowy, włączony w clang-tidy domyślnie. Jego znaleziska
+#   wychodzą w **cudzych** nagłówkach (korutyny Boosta, `<filesystem>` z MSVC) i nie da się ich
+#   odfiltrować `HeaderFilterRegex`, bo diagnostyka ścieżkowa jest przypisywana do miejsca
+#   w głębi wywołania. CI byłoby czerwone z powodów, których nie mamy jak naprawić.
+#
+# bugprone-easily-swappable-parameters — „dwa sąsiednie parametry tego samego typu" opisuje
+#   połowę tego kodu (`tile, slot`, `width, height`, `low, high`). Poprawka to opakowanie
+#   każdej pary we własny typ; przy arytmetyce kafelków byłoby to więcej hałasu niż ochrony.
+#
+# cert-err58-cpp — obiekty statyczne, których konstruktor może rzucić. Dotyczy wyłącznie tablic
+#   `constexpr`/`const` z nagłówków i testów GoogleTest, gdzie makro `TEST()` robi dokładnie to.
+#
+# misc-include-cleaner — sprawdza dołączenia przechodnie i przy Booście z korutynami wypisuje
+#   setki podpowiedzi na plik. Higiena nagłówków jest tu warta pilnowania, ale nie tym
+#   narzędziem i nie kosztem czerwonego CI przy każdej zmianie wersji Boosta.
+#
+# misc-non-private-member-variables-in-classes — struktury takie jak `MatchServices`, `Options`
+#   czy `Attack` są **z założenia** workiem na dane bez zachowania. Zamknięcie ich w gettery
+#   dałoby sto linii kodu, który niczego nie pilnuje.
+#
+# misc-use-anonymous-namespace — proponuje przestawianie `static` na anonimową przestrzeń nazw
+#   także tam, gdzie chodzi o stałą w nagłówku.
+#
+# modernize-use-nodiscard — chce `[[nodiscard]]` na każdym stałym akcesorze. To są w tym kodzie
+#   dziesiątki jednolinijkowców w rodzaju `width()`, `tiles_of()` czy `map()`; atrybut przy
+#   każdym z nich zamienia nagłówek w listę adnotacji, a złapałby wyłącznie wywołanie gettera
+#   dla samego wywołania — czyli błąd, którego w tym repo nie ma ani jednego.
+#
+# modernize-use-auto — chce `auto` wszędzie, gdzie po prawej stoi rzutowanie. Repo pisze typy
+#   wprost i robi to konsekwentnie; `auto` w połowie deklaracji byłoby gorsze od obu skrajności.
+#   Reguła znajdowała osiemnaście miejsc i w żadnym nie chodziło o pomyłkę.
+#
+# readability-math-missing-parentheses — żąda `(a * b) + c`. W kodzie, w którym `y * width + x`
+#   występuje czterdzieści kilka razy, to jest nawias na najpowszechniej znanej regule
+#   pierwszeństwa w programowaniu. Dokładałby szumu, nie znaczenia.
+#
+# modernize-use-trailing-return-type — `auto f() -> int` zamiast `int f()`. Czysta kwestia
+#   stylu, a repo trzyma jeden styl w `.clang-format`.
+#
+# modernize-use-designated-initializers — chciałby `.pole = wartość` przy każdej inicjalizacji
+#   agregatu, łącznie z dwupolowymi strukturami pomocniczymi wewnątrz funkcji.
+#
+# readability-function-cognitive-complexity — mierzy złożoność progiem, którego pętla podboju
+#   nie przejdzie bez rozbicia na funkcje przekazujące sobie osiem argumentów. Czytelność tego
+#   miejsca pilnuje przegląd kodu, nie licznik rozgałęzień.
+#
+# readability-identifier-length — zabrania nazw krótszych niż trzy znaki; w tym kodzie `dx`,
+#   `dy` i `id` są nazwami lepszymi od czegokolwiek dłuższego.
+#
+# readability-magic-numbers — symulacja **jest** zbiorem wystrojonych stałych. Każda z nich
+#   ma już nazwę i komentarz z powodem tam, gdzie to cokolwiek daje; reszta to wykładniki
+#   wzorów, których wyciąganie do stałych zaciemniłoby wzór.
+#
+# readability-suspicious-call-argument — heurystyka „te dwa argumenty wyglądają na zamienione",
+#   porównująca nazwy parametrów. Trafia w komparator kolejki podboju: standardowa biblioteka
+#   Microsoftu woła go z `_Right, _Left` w swoim sprawdzeniu spójności, a nasze parametry
+#   nazywają się `left` i `right`. Zgłoszenie wypada w cudzym nagłówku, więc nie da się go
+#   odfiltrować po ścieżce, a sam komparator jest poprawny i ma na to test.
+#
+# readability-uppercase-literal-suffix — `1u` kontra `1U`. Nie ma opinii wartej czerwonego CI.
+
+# Wyłącznie nasze nagłówki. Boost, protobuf i OpenSSL nie są nasze do poprawiania, a kod
+# generowany z `game.proto` powstaje w katalogu budowania.
+#
+# **Obie odmiany separatora są tu konieczne.** Windows podaje ścieżki mieszane
+# (`...\gameserver\src\app/log.hpp`), więc wzorzec z samym ukośnikiem nie dopasowuje niczego —
+# a niedopasowany filtr nagłówków nie hałasuje, tylko **po cichu nic nie sprawdza**. Analizator
+# przechodził wtedy na zielono, nie zaglądając do ani jednego nagłówka, czyli do miejsca,
+# w którym w tym projekcie mieszka większość kodu wstawianego śródwierszowo.
+HeaderFilterRegex: '.*[/\\]gameserver[/\\](src|tools)[/\\].*'
+
+# Nazewnictwo pilnowane jest tylko tam, gdzie repo faktycznie trzyma konwencję: typy
+# `PascalCase`, wszystko inne `snake_case`, prywatne pola z podkreśleniem na końcu.
+CheckOptions:
+  # `static_cast<void>(...)` ma znaczyć „wiem, że tu jest wynik, i świadomie go pomijam".
+  # Domyślnie reguła nie uznaje tego zapisu i jedynym wyjściem zostaje `NOLINT` — czyli
+  # wyłączenie kontroli zamiast zapisania decyzji w kodzie. Dotyczy dwóch miejsc, oba to
+  # zamykanie gniazda na wyjściu, gdzie jedyną reakcją na błąd byłoby zamknięcie go raz jeszcze.
+  bugprone-unused-return-value.AllowCastToVoid: true
+  cert-err33-c.AllowCastToVoid: true
+
+  readability-identifier-naming.ClassCase: CamelCase
+  readability-identifier-naming.StructCase: CamelCase
+  readability-identifier-naming.EnumCase: CamelCase
+  readability-identifier-naming.FunctionCase: lower_case
+  readability-identifier-naming.VariableCase: lower_case
+  readability-identifier-naming.ParameterCase: lower_case
+  readability-identifier-naming.PrivateMemberCase: lower_case
+  readability-identifier-naming.PrivateMemberSuffix: _
+  readability-identifier-naming.NamespaceCase: lower_case
+  readability-identifier-naming.ConstexprVariableCase: lower_case
+  readability-identifier-naming.GlobalConstantCase: lower_case
+  readability-identifier-naming.StaticConstantCase: lower_case
+  readability-braces-around-statements.ShortStatementLines: 0

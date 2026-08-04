@@ -9,6 +9,7 @@
     "boost-json",
     "openssl",
     "protobuf",
+    "zlib",
     "gtest"
   ]
 }

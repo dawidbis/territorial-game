@@ -48,6 +48,15 @@ jobs:
           cmake --build --preset windows-ninja || exit /b 1
           ctest --preset windows-ninja || exit /b 1
 
+      # Analizator chodzi tutaj, a nie w zadaniu linuksowym, i to nie jest wybór platformy
+      # z sympatii: clang-tidy z Linuksa czyta libstdc++, a ten chowa `<expected>` za warunkiem
+      # `__cpp_concepts >= 202002`, którego clang nie spełnia (decyzja 6.5) — analiza padłaby
+      # na każdym pliku używającym `std::expected`. Ze standardową biblioteką Microsoftu tego
+      # problemu nie ma, a `compile_commands.json` jest już zbudowany krok wyżej.
+      - name: Analiza statyczna (clang-tidy)
+        shell: pwsh
+        run: ./gameserver/tools/run-clang-tidy.ps1
+
   linux:
     name: linux-gcc
     runs-on: ubuntu-latest
@@ -83,6 +92,49 @@ jobs:
       - name: Testy
         working-directory: gameserver
         run: ctest --preset linux-gcc
+
+  sanitizers:
+    name: linux-gcc-sanitizers
+    runs-on: ubuntu-latest
+
+    # Sanitizery są **osobnym zadaniem, a nie dodatkiem do budowy linuksowej**: instrumentacja
+    # zmienia flagi kompilacji, więc i tak jest to druga budowa. Osobno widać też od razu, czy
+    # padł test, czy naruszenie pamięci — a to dwie różne wiadomości.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Przypnij vcpkg do baseline'u z manifestu
+        run: |
+          baseline=$(grep -o '"builtin-baseline": "[^"]*"' gameserver/vcpkg.json | cut -d'"' -f4)
+          git -C "$VCPKG_INSTALLATION_ROOT" fetch --depth 1 origin "$baseline"
+          git -C "$VCPKG_INSTALLATION_ROOT" checkout --force --detach FETCH_HEAD
+          echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
+
+      # Ten sam klucz co w zadaniu linuksowym: zależności nie są instrumentowane, więc
+      # sanitizery nie zmieniają ani jednego pakietu vcpkg — a to znaczy trafienie w cache.
+      - name: Cache pakietów vcpkg
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-linux-${{ hashFiles('gameserver/vcpkg.json') }}
+          restore-keys: vcpkg-linux-
+
+      - name: Konfiguracja
+        working-directory: gameserver
+        run: cmake --preset linux-gcc-sanitizers
+
+      - name: Budowa
+        working-directory: gameserver
+        run: cmake --build --preset linux-gcc-sanitizers
+
+      # Zmienne środowiskowe sanitizerów siedzą w presecie testów, nie tutaj — dzięki temu
+      # lokalne `ctest --preset linux-gcc-sanitizers` robi dokładnie to samo co CI.
+      - name: Testy pod ASan i UBSan
+        working-directory: gameserver
+        run: ctest --preset linux-gcc-sanitizers
 
   proto:
     name: codegen klienta

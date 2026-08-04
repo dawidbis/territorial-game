@@ -50,6 +50,16 @@
       }
     },
     {
+      "name": "windows-ninja-asan",
+      "inherits": "windows-ninja",
+      "displayName": "Windows / MSVC (Ninja, AddressSanitizer)",
+      "description": "Budowa z /fsanitize=address do polowania na dostep po zwolnieniu i przepelnienia bufora. MSVC nie ma UBSan - ten chodzi na Linuksie, preset linux-gcc-sanitizers. Wymaga skladnika 'C++ AddressSanitizer' w instalatorze Visual Studio.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "GAMESERVER_SANITIZERS": "address"
+      }
+    },
+    {
       "name": "linux-gcc",
       "inherits": "base",
       "displayName": "Linux / GCC",
@@ -64,6 +74,16 @@
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_CXX_COMPILER": "g++",
         "VCPKG_TARGET_TRIPLET": "x64-linux"
+      }
+    },
+    {
+      "name": "linux-gcc-sanitizers",
+      "inherits": "linux-gcc",
+      "displayName": "Linux / GCC (ASan + UBSan)",
+      "description": "Ta sama platforma co produkcyjna, ale z sanitizerami. Wykrywa to, czego nie widzi zaden test jednostkowy: dostep do zwolnionej ramki korutyny, wiszaca referencje w MatchServices, przepelnienie przy indeksowaniu kafelkow i przepelnienie ze znakiem. Debug, bo -O2 zjada nazwy w sladzie stosu.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "GAMESERVER_SANITIZERS": "address;undefined"
       }
     }
   ],
@@ -84,6 +104,14 @@
     {
       "name": "linux-gcc",
       "configurePreset": "linux-gcc"
+    },
+    {
+      "name": "linux-gcc-sanitizers",
+      "configurePreset": "linux-gcc-sanitizers"
+    },
+    {
+      "name": "windows-ninja-asan",
+      "configurePreset": "windows-ninja-asan"
     }
   ],
   "testPresets": [
@@ -114,6 +142,35 @@
       "configurePreset": "linux-gcc",
       "output": {
         "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-gcc-sanitizers",
+      "configurePreset": "linux-gcc-sanitizers",
+      "description": "Testy pod sanitizerami sa kilka razy wolniejsze, stad wyzszy limit czasu na przypadek. detect_container_overflow=0, bo protobuf z vcpkg nie jest instrumentowany - patrz opis presetu windows-ninja-asan.",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 300
+      },
+      "environment": {
+        "ASAN_OPTIONS": "detect_container_overflow=0:abort_on_error=1",
+        "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1"
+      }
+    },
+    {
+      "name": "windows-ninja-asan",
+      "configurePreset": "windows-ninja-asan",
+      "description": "detect_container_overflow=0 nie jest luzem w ochronie, tylko warunkiem jej poprawnosci: adnotacje kontenerow ustawia kod instrumentowany, a zmienia je takze libprotobuf z vcpkg, ktory instrumentowany nie jest. Bez tego ASan zglasza przepelnienie w cudzym naglowku przy pierwszym snapshocie. Przywrocic, gdy zaleznosci beda budowane z ASan.",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 300
+      },
+      "environment": {
+        "ASAN_OPTIONS": "detect_container_overflow=0"
       }
     }
   ]

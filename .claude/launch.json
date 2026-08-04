@@ -2,6 +2,20 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "meta",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": [
+        "run",
+        "--project",
+        "meta/src/Territorial.Meta.Api",
+        "--",
+        "--Lobby:GatheringSeconds=30"
+      ],
+      "port": 5001,
+      "url": "https://localhost:5001",
+      "autoPort": false
+    },
+    {
       "name": "client",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "client", "run", "start"],
